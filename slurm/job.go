@@ -57,13 +57,22 @@ func stateFromString(s string) JobState {
 	}
 }
 
-// Styles for job states
+// Define state colors based on the palette
 var (
-	stateStyleRunning   = lipgloss.NewStyle().Background(lipgloss.Color("208")) // Orange
-	stateStyleCompleted = lipgloss.NewStyle().Background(lipgloss.Color("78"))  // Green
-	stateStyleFailed    = lipgloss.NewStyle().Background(lipgloss.Color("196")) // Red
-	stateStylePending   = lipgloss.NewStyle().Background(lipgloss.Color("242")) // Grey
-	stateStyleUnknown   = lipgloss.NewStyle().Background(lipgloss.Color("236")) // Darker Grey
+	colorRunning   = lipgloss.Color("208") // Orange
+	colorCompleted = lipgloss.Color("142") // Muted Green
+	colorFailed    = lipgloss.Color("167") // Muted Red
+	colorPending   = lipgloss.Color("244") // Medium Grey
+	colorUnknown   = lipgloss.Color("238") // Darker Grey
+)
+
+// Styles for job states (using Background)
+var (
+	stateStyleRunning   = lipgloss.NewStyle().Background(colorRunning)
+	stateStyleCompleted = lipgloss.NewStyle().Background(colorCompleted)
+	stateStyleFailed    = lipgloss.NewStyle().Background(colorFailed)
+	stateStylePending   = lipgloss.NewStyle().Background(colorPending)
+	stateStyleUnknown   = lipgloss.NewStyle().Background(colorUnknown)
 )
 
 type JobInfo struct {
@@ -82,19 +91,21 @@ type JobInfo struct {
 
 // Implement bubble tea List interface
 func (j JobInfo) Title() string {
-	var stateStr string
+	var stateStyle lipgloss.Style // Use base style type
 	switch j.State {
 	case Running:
-		stateStr = stateStyleRunning.Render(j.State.String())
+		stateStyle = stateStyleRunning
 	case Completed:
-		stateStr = stateStyleCompleted.Render(j.State.String())
+		stateStyle = stateStyleCompleted
 	case Failed:
-		stateStr = stateStyleFailed.Render(j.State.String())
+		stateStyle = stateStyleFailed
 	case Pending:
-		stateStr = stateStylePending.Render(j.State.String())
+		stateStyle = stateStylePending
 	default:
-		stateStr = stateStyleUnknown.Render(j.State.String())
+		stateStyle = stateStyleUnknown
 	}
+	// Render the state with its style
+	stateStr := stateStyle.Render(j.State.String())
 	// Prepend styled state to title
 	return fmt.Sprintf("%s | %s | %s", stateStr, j.JobID, j.JobName)
 }

@@ -10,7 +10,15 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-var docStyle = lipgloss.NewStyle()
+// Define Colors (keeping necessary ones)
+var (
+	textColor   = lipgloss.Color("252")
+	labelColor  = lipgloss.Color("250")
+	accentColor = lipgloss.Color("79") // Muted Aqua/Teal
+)
+
+// docStyle without background, but with foreground
+var docStyle = lipgloss.NewStyle().Foreground(textColor)
 
 type model struct {
 	jobs   list.Model
@@ -42,7 +50,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Create the list style temporarily to get its vertical border size
 		listStyle := lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder(), true).
+			Border(lipgloss.RoundedBorder(), true).
 			Width(listWidth - 2) // Match the width used in View
 		listVerticalMargin := listStyle.GetVerticalFrameSize()
 
@@ -63,28 +71,53 @@ func (m model) View() string {
 		selectedJob = item
 	}
 
-	details := fmt.Sprintf(
-		"Job ID: %s\nName: %s\nStatus: %s\n",
-		selectedJob.JobID,
-		selectedJob.JobName,
-		selectedJob.State,
+	// Style for labels in the details view
+	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(labelColor)
+
+	// Build details string line by line
+	jobIdLine := labelStyle.Render("Job ID:") + " " + selectedJob.JobID
+	nameLine := labelStyle.Render("Name:") + " " + selectedJob.JobName
+	// State is already handled in the list title, but we can show it here too if desired
+	// stateLine := labelStyle.Render("Status:") + " " + selectedJob.State.String()
+	userLine := labelStyle.Render("User:") + " " + selectedJob.User
+	accountLine := labelStyle.Render("Account:") + " " + selectedJob.Account
+	startTimeLine := labelStyle.Render("Start Time:") + " " + selectedJob.StartTime
+	elapsedTimeLine := labelStyle.Render("Elapsed:") + " " + selectedJob.ElapsedTime
+	allocCpusLine := labelStyle.Render("Alloc CPUs:") + " " + selectedJob.AllocCPUS
+	allocTresLine := labelStyle.Render("Alloc TRES:") + " " + selectedJob.AllocTRES
+
+	// Use JoinVertical for better control over details layout
+	detailsContent := lipgloss.JoinVertical(lipgloss.Left,
+		jobIdLine,
+		nameLine,
+		// stateLine, // Uncomment if you want state here too
+		userLine,
+		accountLine,
+		startTimeLine,
+		elapsedTimeLine,
+		allocCpusLine,
+		allocTresLine,
 	)
 
 	listWidth := m.width / 3
 	detailsWidth := m.width - listWidth
 
+	// Styles without background, but with foreground and border color
 	listStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder(), true).
+		Foreground(textColor).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(accentColor).
 		Width(listWidth - 2)
 	detailsStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder(), true).
-		Width(detailsWidth - 2).
-		PaddingLeft(1).
-		PaddingRight(1)
+		Foreground(textColor).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(accentColor).
+		Width(detailsWidth-2).
+		Padding(0, 1)
 
 	view := lipgloss.JoinHorizontal(lipgloss.Top,
 		listStyle.Render(listView),
-		detailsStyle.Render(details),
+		detailsStyle.Render(detailsContent),
 	)
 
 	return docStyle.Render(view)
