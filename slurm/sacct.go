@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type Sacct struct {
@@ -17,19 +18,33 @@ func (s *Sacct) Parse(output string) error {
 
 	fieldNames := []string{}
 	for _, line := range lines {
-		if line == "" {
+		if line == "" || strings.Contains(line, "-----") {
 			continue
 		}
 
 		if strings.Contains(line, "JobID") {
 			// Split line by spacing
-			fieldNames = strings.Split(line, " ")
-			// Print fields
-			fmt.Println("Field names:", fieldNames)
+			fieldNames = strings.Fields(line)
 			continue
 		}
 
-		fields := strings.Split(line, " ")
+		// Split by whitespace and filter out empty fields
+		fields := []string{}
+		for _, field := range strings.Fields(line) {
+			if field != "" && field != " " {
+				fields = append(fields, field)
+			}
+		}
+
+		if strings.Contains(fields[0], ".ba") || strings.Contains(fields[0], ".ex") {
+			continue
+		}
+
+		if len(fields) != len(fieldNames) {
+			// Combine the format string into one line
+			continue // Skip lines that don't match the header structure
+		}
+
 		job := parseJob(fields, fieldNames)
 		s.Jobs = append(s.Jobs, job)
 	}
@@ -39,62 +54,51 @@ func (s *Sacct) Parse(output string) error {
 func parseJob(fields []string, fieldNames []string) JobInfo {
 	job := JobInfo{}
 
-	occupancy := [11]bool{}
-
-	for i, field := range fields {
-		fieldName := fieldNames[i]
-		switch fieldName {
-		case "JobID":
-			job.JobID = field
-			occupancy[0] = true
-		case "JobName":
-			job.JobName = field
-			occupancy[1] = true
-		case "User":
-			job.User = field
-			occupancy[2] = true
-		case "Account":
-			job.Account = field
-			occupancy[3] = true
-		case "State":
-			job.State = stateFromString(field)
-			occupancy[4] = true
-		case "StartTime":
-			job.StartTime = field
-			occupancy[5] = true
-		case "EndTime":
-			job.EndTime = field
-			occupancy[6] = true
-		case "Elapsed":
-			job.ElapsedTime = field
-			occupancy[7] = true
-		case "AllocCPUS":
-			job.AllocCPUS = field
-			occupancy[8] = true
-		case "AllocTRES":
-			job.AllocTRES = field
-			occupancy[9] = true
-		case "StdOut":
-			job.StdOutFile = field
-			occupancy[10] = true
-		default:
-			fmt.Println("Unknown field:", fieldName)
+	// Use a map for easier field assignment
+	fieldMap := make(map[string]string)
+	for i, name := range fieldNames {
+		if i < len(fields) {
+			fieldMap[name] = fields[i]
 		}
 	}
 
-	for i, occupied := range occupancy {
-		if !occupied {
-			fmt.Println("Missing field:", fieldNames[i])
-		}
+	var ok bool
+	if job.JobID, ok = fieldMap["JobID"]; !ok { fmt.Println("Missing field: JobID") }
+	if job.JobName, ok = fieldMap["JobName"]; !ok { fmt.Println("Missing field: JobName") }
+	if job.User, ok = fieldMap["User"]; !ok { fmt.Println("Missing field: User") }
+	if job.Account, ok = fieldMap["Account"]; !ok { fmt.Println("Missing field: Account") }
+	if stateStr, ok := fieldMap["State"]; ok {
+		job.State = stateFromString(stateStr)
+	} else {
+		fmt.Println("Missing field: State")
 	}
+	if job.StartTime, ok = fieldMap["Start"]; !ok { fmt.Println("Missing field: Start") }
+	if job.ElapsedTime, ok = fieldMap["Elapsed"]; !ok { fmt.Println("Missing field: Elapsed") }
+	if job.TimeLimit, ok = fieldMap["Timelimit"]; !ok { fmt.Println("Missing field: Timelimit") }
+	if job.AllocCPUS, ok = fieldMap["AllocCPUS"]; !ok { fmt.Println("Missing field: AllocCPUS") }
+	if job.AllocTRES, ok = fieldMap["AllocTRES"]; !ok { fmt.Println("Missing field: AllocTRES") }
+
 	return job
 }
 
 func RunSacct(user string) (*Sacct, error) {
-	cmd := exec.Command("sacct", "--format=JobID,JobName,User,Account,State,StartTime,EndTime,Elapsed,AllocCPUS,AllocTRES,StdOut", "--name", user)
-	output, err := cmd.Output()
+	// Calculate the date two weeks ago
+	now := time.Now()
+	twoWeeksAgo := now.AddDate(0, 0, -14)
+	startDate := twoWeeksAgo.Format("2006-01-02") // Format date as YYYY-MM-DD
+
+	// Add the --starttime flag to the sacct command
+	cmd := exec.Command("sacct",
+		"--allocations",
+		"--format=JobID%-30,JobName%-50,User,Account%-30,State,Start,Elapsed,Timelimit,AllocCPUS,AllocTRES%-100",
+		"--user", user,
+		"--starttime", startDate, // Add start time filter
+	)
+	output, err := cmd.CombinedOutput() // Use CombinedOutput to capture stderr as well
 	if err != nil {
-		return nil, err
+		// Combine the format string into one line with explicit newlines
+		fmt.Printf("Error running sacct: %v\nOutput:\n%s\n", err, string(output))
+		return nil, fmt.Errorf("sacct command failed: %w", err)
 	}
 	sacct := &Sacct{}
 	err = sacct.Parse(string(output))

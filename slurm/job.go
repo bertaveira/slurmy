@@ -17,6 +17,7 @@ const (
 	Completed
 	Failed
 	Pending
+	Canceled
 	// Add other states as needed from sacct documentation
 	// e.g., Cancelled, Timeout, NodeFail, Preempted, Suspended
 )
@@ -32,6 +33,8 @@ func (s JobState) String() string {
 		return "Failed"
 	case Pending:
 		return "Pending"
+	case Canceled:
+		return "Canceled"
 	// Add cases for other states
 	default:
 		return "Unknown"
@@ -40,21 +43,23 @@ func (s JobState) String() string {
 
 // Helper function to convert string to JobState
 func stateFromString(s string) JobState {
-	switch strings.ToLower(s) { // Use ToLower for case-insensitivity
-	case "running", "Running":
+	s = strings.ToLower(s) // Convert to lowercase once for all checks
+	
+	if strings.Contains(s, "running") {
 		return Running
-	case "completed", "Completed":
+	} else if strings.Contains(s, "completed") {
 		return Completed
-	case "failed", "Failed":
+	} else if strings.Contains(s, "failed") {
 		return Failed
-	case "pending", "Pending":
+	} else if strings.Contains(s, "pending") {
 		return Pending
-	// Add cases for other state strings from sacct
-	default:
-		// Optionally log or handle unknown states from sacct
-		fmt.Printf("Warning: Unknown job state string encountered: %s\n", s)
-		return Unknown
+	} else if strings.Contains(s, "cancel") {
+		return Canceled
 	}
+	// Add cases for other state strings from sacct
+	
+	// Optionally log or handle unknown states from sacct
+	return Unknown
 }
 
 // Styles for job states (using Background)
@@ -70,6 +75,7 @@ var (
 	colorFailed    = lipgloss.Color("#DB45BE")
 	colorPending   = lipgloss.Color("#EEF572")
 	colorUnknown   = lipgloss.Color("#CDAEB5")
+	colorCanceled  = lipgloss.Color("#808080")
 )
 
 type JobInfo struct {
@@ -79,11 +85,11 @@ type JobInfo struct {
 	Account     string
 	State       JobState
 	StartTime   string
-	EndTime     string
 	ElapsedTime string
+	TimeLimit   string
 	AllocCPUS   string
 	AllocTRES   string
-	StdOutFile  string
+	// StdOutFile  string
 }
 
 // Implement bubble tea List interface
@@ -98,6 +104,8 @@ func (j JobInfo) Title() string {
 		stateStyle = stateBaseStyle.Background(colorFailed)
 	case Pending:
 		stateStyle = stateBaseStyle.Background(colorPending)
+	case Canceled:
+		stateStyle = stateBaseStyle.Background(colorCanceled)
 	default:
 		stateStyle = stateBaseStyle.Background(colorUnknown)
 	}
