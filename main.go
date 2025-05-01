@@ -173,7 +173,7 @@ func main() {
 		jobs: list.New(initialJobs, delegate, 0, 0), // Use fetched jobs
 		user: username,                              // Store username in model
 	}
-	m.jobs.Title = "Slurm Jobs"
+	m.jobs.Title = "Your Slurm Jobs (last month)"
 
 	// Style the list title
 	m.jobs.Styles.Title = titleStyle

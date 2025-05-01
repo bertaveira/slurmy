@@ -85,7 +85,7 @@ func parseJob(fields []string, fieldNames []string) JobInfo {
 func RunSacct(user string) (*Sacct, error) {
 	// Calculate the date two weeks ago
 	now := time.Now()
-	twoWeeksAgo := now.AddDate(0, 0, -14)
+	twoWeeksAgo := now.AddDate(0, 0, -30)
 	startDate := twoWeeksAgo.Format("2006-01-02") // Format date as YYYY-MM-DD
 
 	// Add the --starttime flag to the sacct command
