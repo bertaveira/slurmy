@@ -142,8 +142,14 @@ func main() {
 			State:   slurm.Unknown,
 		},
 	}
+
+	// Create a delegate and customize its styles
+	delegate := list.NewDefaultDelegate()
+	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.Foreground(highlight).BorderLeftForeground(highlight)
+	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.Foreground(subtle).BorderLeftForeground(highlight) // Keep description subtle
+
 	m := model{
-		jobs: list.New(jobs, list.NewDefaultDelegate(), 0, 0),
+		jobs: list.New(jobs, delegate, 0, 0), // Use the customized delegate
 	}
 	m.jobs.Title = "Slurm Jobs"
 

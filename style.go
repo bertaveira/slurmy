@@ -8,11 +8,12 @@ import (
 var (
 	// General.
 
-	normal    = lipgloss.Color("#EEEEEE")
-	subtle    = lipgloss.AdaptiveColor{Light: "#D9DCCF", Dark: "#383838"}
-	highlight = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
-	special   = lipgloss.AdaptiveColor{Light: "#43BF6D", Dark: "#73F59F"}
-	blends    = gamut.Blends(lipgloss.Color("#F25D94"), lipgloss.Color("#EDFF82"), 50)
+	normal        = lipgloss.Color("#EEEEEE")
+	subtle        = lipgloss.AdaptiveColor{Light: "#D9DCCF", Dark: "#383838"}
+	highlight     = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#08F2CF"}
+	softHighlight = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
+	special       = lipgloss.AdaptiveColor{Light: "#43BF6D", Dark: "#73F59F"}
+	blends        = gamut.Blends(lipgloss.Color("#F25D94"), lipgloss.Color("#EDFF82"), 50)
 
 	base = lipgloss.NewStyle().Foreground(normal)
 
@@ -79,6 +80,11 @@ var (
 			Render
 
 	listItemStyle = base.PaddingLeft(2).Render
+
+	selectedItemStyle = lipgloss.NewStyle().
+				PaddingLeft(2).
+				Foreground(normal).
+				Background(highlight)
 
 	// Page.
 
