@@ -5,6 +5,7 @@ package slurm
 import (
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 )
@@ -105,5 +106,9 @@ func RunSacct(user string) (*Sacct, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Reverse the slice using the slices package
+	slices.Reverse(sacct.Jobs)
+
 	return sacct, nil
 }
