@@ -10,16 +10,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Define Colors (keeping necessary ones)
-var (
-	textColor   = lipgloss.Color("252")
-	labelColor  = lipgloss.Color("250")
-	accentColor = lipgloss.Color("79") // Muted Aqua/Teal
-)
-
-// docStyle without background, but with foreground
-var docStyle = lipgloss.NewStyle().Foreground(textColor)
-
 type model struct {
 	jobs   list.Model
 	width  int
@@ -49,9 +39,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Create the list style temporarily to get its vertical border size
-		listStyle := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder(), true).
-			Width(listWidth - 2) // Match the width used in View
+		listStyle := listStyle.Width(listWidth - 2) // Match the width used in View
 		listVerticalMargin := listStyle.GetVerticalFrameSize()
 
 		h, v := docStyle.GetFrameSize() // Use docStyle frame size
@@ -72,7 +60,7 @@ func (m model) View() string {
 	}
 
 	// Style for labels in the details view
-	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(labelColor)
+	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(highlight)
 
 	// Build details string line by line
 	jobIdLine := labelStyle.Render("Job ID:") + " " + selectedJob.JobID
@@ -101,23 +89,9 @@ func (m model) View() string {
 
 	listWidth := m.width / 3
 	detailsWidth := m.width - listWidth
-
-	// Styles without background, but with foreground and border color
-	listStyle := lipgloss.NewStyle().
-		Foreground(textColor).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(accentColor).
-		Width(listWidth - 2)
-	detailsStyle := lipgloss.NewStyle().
-		Foreground(textColor).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(accentColor).
-		Width(detailsWidth-2).
-		Padding(0, 1)
-
 	view := lipgloss.JoinHorizontal(lipgloss.Top,
-		listStyle.Render(listView),
-		detailsStyle.Render(detailsContent),
+		listStyle.Width(listWidth-2).Render(listView),
+		listStyle.Width(detailsWidth-2).Padding(0, 1).Render(detailsContent),
 	)
 
 	return docStyle.Render(view)
@@ -139,12 +113,42 @@ func main() {
 			Account: "test",
 			State:   slurm.Failed,
 		},
+		slurm.JobInfo{
+			JobID:   "76",
+			JobName: "nerfstudio",
+			User:    "test",
+			Account: "test",
+			State:   slurm.Pending,
+		},
+		slurm.JobInfo{
+			JobID:   "77",
+			JobName: "nerfstudio",
+			User:    "test",
+			Account: "test",
+			State:   slurm.Pending,
+		},
+		slurm.JobInfo{
+			JobID:   "78",
+			JobName: "nerfstudio",
+			User:    "test",
+			Account: "test",
+			State:   slurm.Completed,
+		},
+		slurm.JobInfo{
+			JobID:   "79",
+			JobName: "nerfstudio",
+			User:    "test",
+			Account: "test",
+			State:   slurm.Unknown,
+		},
 	}
-
 	m := model{
 		jobs: list.New(jobs, list.NewDefaultDelegate(), 0, 0),
 	}
 	m.jobs.Title = "Slurm Jobs"
+
+	// Style the list title
+	m.jobs.Styles.Title = titleStyle
 
 	p := tea.NewProgram(m)
 	_, err := p.Run()

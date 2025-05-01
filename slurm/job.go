@@ -57,22 +57,19 @@ func stateFromString(s string) JobState {
 	}
 }
 
-// Define state colors based on the palette
-var (
-	colorRunning   = lipgloss.Color("208") // Orange
-	colorCompleted = lipgloss.Color("142") // Muted Green
-	colorFailed    = lipgloss.Color("167") // Muted Red
-	colorPending   = lipgloss.Color("244") // Medium Grey
-	colorUnknown   = lipgloss.Color("238") // Darker Grey
-)
-
 // Styles for job states (using Background)
 var (
-	stateStyleRunning   = lipgloss.NewStyle().Background(colorRunning)
-	stateStyleCompleted = lipgloss.NewStyle().Background(colorCompleted)
-	stateStyleFailed    = lipgloss.NewStyle().Background(colorFailed)
-	stateStylePending   = lipgloss.NewStyle().Background(colorPending)
-	stateStyleUnknown   = lipgloss.NewStyle().Background(colorUnknown)
+	stateBaseStyle = lipgloss.NewStyle().
+			MarginLeft(1).
+			MarginRight(1).
+			Padding(0, 2).
+			Italic(true).
+			Foreground(lipgloss.Color("#EEEEEE"))
+	colorRunning   = lipgloss.Color("#08F2CF")
+	colorCompleted = lipgloss.Color("#08F298")
+	colorFailed    = lipgloss.Color("#DB45BE")
+	colorPending   = lipgloss.Color("#EEF572")
+	colorUnknown   = lipgloss.Color("#CDAEB5")
 )
 
 type JobInfo struct {
@@ -94,20 +91,20 @@ func (j JobInfo) Title() string {
 	var stateStyle lipgloss.Style // Use base style type
 	switch j.State {
 	case Running:
-		stateStyle = stateStyleRunning
+		stateStyle = stateBaseStyle.Background(colorRunning)
 	case Completed:
-		stateStyle = stateStyleCompleted
+		stateStyle = stateBaseStyle.Background(colorCompleted)
 	case Failed:
-		stateStyle = stateStyleFailed
+		stateStyle = stateBaseStyle.Background(colorFailed)
 	case Pending:
-		stateStyle = stateStylePending
+		stateStyle = stateBaseStyle.Background(colorPending)
 	default:
-		stateStyle = stateStyleUnknown
+		stateStyle = stateBaseStyle.Background(colorUnknown)
 	}
 	// Render the state with its style
 	stateStr := stateStyle.Render(j.State.String())
 	// Prepend styled state to title
-	return fmt.Sprintf("%s | %s | %s", stateStr, j.JobID, j.JobName)
+	return fmt.Sprintf("%s %s / %s", stateStr, j.JobID, j.JobName)
 }
 
 func (j JobInfo) Description() string {
