@@ -97,9 +97,9 @@ func (j JobInfo) Title() string {
 	var stateStyle lipgloss.Style // Use base style type
 	switch j.State {
 	case Running:
-		stateStyle = stateBaseStyle.Background(colorRunning)
+		stateStyle = stateBaseStyle.Background(colorRunning).Foreground(lipgloss.Color("#1C1C1C"))
 	case Completed:
-		stateStyle = stateBaseStyle.Background(colorCompleted)
+		stateStyle = stateBaseStyle.Background(colorCompleted).Foreground(lipgloss.Color("#1C1C1C"))
 	case Failed:
 		stateStyle = stateBaseStyle.Background(colorFailed)
 	case Pending:
