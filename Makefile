@@ -6,13 +6,13 @@ build: build-linux-amd64
 # Build for Linux amd64 (most common)
 build-linux-amd64:
 	@echo "Building for Linux amd64..."
-	GOOS=linux GOARCH=amd64 go build -o slurmy-linux-amd64 .
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o slurmy-linux-amd64 .
 	@echo "✓ Built slurmy-linux-amd64"
 
 # Build for Linux arm64 (for newer clusters)
 build-linux-arm64:
 	@echo "Building for Linux arm64..."
-	GOOS=linux GOARCH=arm64 go build -o slurmy-linux-arm64 .
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o slurmy-linux-arm64 .
 	@echo "✓ Built slurmy-linux-arm64"
 
 # Build both architectures
