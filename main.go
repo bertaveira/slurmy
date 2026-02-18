@@ -237,9 +237,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		detailsWidth := m.width - listWidth
 		availableHeight := m.height - v
-		// details box: 9 content lines + 2 borders + 2 padding
+		// details box: 10 content lines + 2 borders + 2 padding
 		// stdout box:  1 title + 2 borders + 2 padding  (viewport fills the rest)
-		detailsHeight := 9 + 2 + 2
+		detailsHeight := 10 + 2 + 2
 		stdoutExtra := 1 + 2 + 2
 		stdoutHeight := availableHeight - detailsHeight - stdoutExtra
 		if max := int(float64(availableHeight) * 0.6); stdoutHeight > max {
@@ -270,10 +270,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			fmt.Fprintf(os.Stderr, "sacct error: %v\n", err)
 			cmds = append(cmds, tickCmd())
 		} else {
-			items := make([]list.Item, len(sacctData.Jobs))
-			for i, job := range sacctData.Jobs {
-				items[i] = job
-			}
+			squeueJobs, _ := slurm.RunSqueue(m.user)
+			items := mergeJobs(squeueJobs, sacctData.Jobs)
 			cmds = append(cmds, m.jobs.SetItems(items), tickCmd())
 		}
 	}
@@ -306,6 +304,14 @@ func (m model) View() string {
 	}
 
 	label := lipgloss.NewStyle().Bold(true).Foreground(highlight)
+	lastDetailRow := label.Render("StdOut:") + " " + selectedJob.ResolveStdOut()
+	if selectedJob.State == slurm.Pending {
+		lastDetailRow = label.Render("Reason:") + " " + selectedJob.Reason
+	}
+	node := selectedJob.NodeList
+	if node == "" {
+		node = "—"
+	}
 	details := lipgloss.JoinVertical(lipgloss.Left,
 		label.Render("Job ID:")     +" "+selectedJob.JobID,
 		label.Render("Name:")       +" "+selectedJob.JobName,
@@ -315,7 +321,8 @@ func (m model) View() string {
 		label.Render("Elapsed:")    +" "+selectedJob.ElapsedTime,
 		label.Render("Alloc CPUs:") +" "+selectedJob.AllocCPUS,
 		label.Render("Alloc TRES:") +" "+selectedJob.AllocTRES,
-		label.Render("StdOut:")     +" "+selectedJob.ResolveStdOut(),
+		label.Render("Node:")       +" "+node,
+		lastDetailRow,
 	)
 
 	listWidth := m.width / 3
@@ -323,7 +330,7 @@ func (m model) View() string {
 
 	_, v := docStyle.GetFrameSize()
 	availableHeight := m.height - v
-	detailsHeight := 9 + 2 + 2
+	detailsHeight := 10 + 2 + 2
 	stdoutExtra := 1 + 2 + 2
 	stdoutHeight := availableHeight - detailsHeight - stdoutExtra
 	if max := int(float64(availableHeight) * 0.6); stdoutHeight > max {
@@ -352,6 +359,27 @@ func (m model) View() string {
 	))
 }
 
+// mergeJobs combines pending jobs from squeue with historical jobs from sacct.
+// squeue jobs come first (pending at the top); duplicates are deduplicated by JobID.
+func mergeJobs(squeueJobs []slurm.JobInfo, sacctJobs []slurm.JobInfo) []list.Item {
+	seen := make(map[string]bool, len(sacctJobs))
+	items := make([]list.Item, 0, len(squeueJobs)+len(sacctJobs))
+
+	for _, job := range squeueJobs {
+		if !seen[job.JobID] {
+			seen[job.JobID] = true
+			items = append(items, job)
+		}
+	}
+	for _, job := range sacctJobs {
+		if !seen[job.JobID] {
+			seen[job.JobID] = true
+			items = append(items, job)
+		}
+	}
+	return items
+}
+
 func main() {
 	currentUser, err := user.Current()
 	if err != nil {
@@ -364,12 +392,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Warning: initial sacct fetch failed: %v\n", err)
 	}
 
+	initialSqueueJobs, _ := slurm.RunSqueue(currentUser.Username)
+
 	var initialJobs []list.Item
 	if initialSacctData != nil {
-		initialJobs = make([]list.Item, len(initialSacctData.Jobs))
-		for i, job := range initialSacctData.Jobs {
-			initialJobs[i] = job
-		}
+		initialJobs = mergeJobs(initialSqueueJobs, initialSacctData.Jobs)
+	} else if len(initialSqueueJobs) > 0 {
+		initialJobs = mergeJobs(initialSqueueJobs, nil)
 	}
 
 	delegate := list.NewDefaultDelegate()

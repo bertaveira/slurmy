@@ -65,7 +65,7 @@ var (
 	colorRunning   = lipgloss.Color("#08F2CF")
 	colorCompleted = lipgloss.Color("#08F298")
 	colorFailed    = lipgloss.Color("#DB45BE")
-	colorPending   = lipgloss.Color("#EEF572")
+	colorPending   = lipgloss.Color("#F5A623")
 	colorUnknown   = lipgloss.Color("#CDAEB5")
 	colorCanceled  = lipgloss.Color("#808080")
 )
@@ -88,7 +88,9 @@ type JobInfo struct {
 	TimeLimit   string
 	AllocCPUS   string
 	AllocTRES   string
+	NodeList    string
 	StdOut      string
+	Reason      string // pending reason from squeue (e.g. "Resources", "Priority")
 }
 
 // Title implements the bubbletea list.Item interface.
@@ -102,7 +104,7 @@ func (j JobInfo) Title() string {
 	case Failed:
 		stateStyle = stateBaseStyle.Background(colorFailed)
 	case Pending:
-		stateStyle = stateBaseStyle.Background(colorPending)
+		stateStyle = stateBaseStyle.Background(colorPending).Foreground(lipgloss.Color("#1C1C1C"))
 	case Canceled:
 		stateStyle = stateBaseStyle.Background(colorCanceled)
 	default:
@@ -111,9 +113,17 @@ func (j JobInfo) Title() string {
 	return fmt.Sprintf("%s %s / %s", stateStyle.Render(j.State.String()), j.JobID, j.JobName)
 }
 
+// formatStart trims an ISO timestamp (2006-01-02T15:04:05) down to date + HH:MM.
+func formatStart(s string) string {
+	if len(s) >= 16 {
+		return strings.Replace(s[:16], "T", " ", 1)
+	}
+	return s
+}
+
 // Description implements the bubbletea list.Item interface.
 func (j JobInfo) Description() string {
-	return fmt.Sprintf("%s | %s | %s", j.User, j.Account, j.AllocTRES)
+	return fmt.Sprintf("%s | %s / elapsed %s", j.User, formatStart(j.StartTime), j.ElapsedTime)
 }
 
 // FilterValue implements the bubbletea list.Item interface.

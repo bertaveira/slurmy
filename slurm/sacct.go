@@ -78,6 +78,7 @@ func parseJob(fields []string, fieldNames []string) JobInfo {
 		TimeLimit:   cleanField(m["Timelimit"]),
 		AllocCPUS:   cleanField(m["AllocCPUS"]),
 		AllocTRES:   cleanField(m["AllocTRES"]),
+		NodeList:    cleanField(m["NodeList"]),
 		StdOut:      cleanField(m["StdOut"]),
 	}
 	return job
@@ -88,7 +89,7 @@ func RunSacct(username string) (*Sacct, error) {
 
 	cmd := exec.Command("sacct",
 		"--allocations",
-		"--format=JobID%-30,JobName%-50,User,Account%-30,State,Start,Elapsed,Timelimit,AllocCPUS,AllocTRES%-100,StdOut%-200",
+		"--format=JobID%-30,JobName%-50,User,Account%-30,State,Start,Elapsed,Timelimit,AllocCPUS,AllocTRES%-100,NodeList%-80,StdOut%-200",
 		"--user", username,
 		"--starttime", startDate,
 	)
