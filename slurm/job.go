@@ -2,15 +2,15 @@ package slurm
 
 import (
 	"fmt"
+	"os/user"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Define JobState type
 type JobState int
 
-// Define constants for job states using iota
 const (
 	Unknown JobState = iota
 	Running
@@ -18,11 +18,8 @@ const (
 	Failed
 	Pending
 	Canceled
-	// Add other states as needed from sacct documentation
-	// e.g., Cancelled, Timeout, NodeFail, Preempted, Suspended
 )
 
-// String method for JobState
 func (s JobState) String() string {
 	switch s {
 	case Running:
@@ -35,34 +32,29 @@ func (s JobState) String() string {
 		return "Pending"
 	case Canceled:
 		return "Canceled"
-	// Add cases for other states
 	default:
 		return "Unknown"
 	}
 }
 
-// Helper function to convert string to JobState
 func stateFromString(s string) JobState {
-	s = strings.ToLower(s) // Convert to lowercase once for all checks
-	
-	if strings.Contains(s, "running") {
+	s = strings.ToLower(s)
+	switch {
+	case strings.Contains(s, "running"):
 		return Running
-	} else if strings.Contains(s, "completed") {
+	case strings.Contains(s, "completed"):
 		return Completed
-	} else if strings.Contains(s, "failed") {
+	case strings.Contains(s, "failed"):
 		return Failed
-	} else if strings.Contains(s, "pending") {
+	case strings.Contains(s, "pending"):
 		return Pending
-	} else if strings.Contains(s, "cancel") {
+	case strings.Contains(s, "cancel"):
 		return Canceled
+	default:
+		return Unknown
 	}
-	// Add cases for other state strings from sacct
-	
-	// Optionally log or handle unknown states from sacct
-	return Unknown
 }
 
-// Styles for job states (using Background)
 var (
 	stateBaseStyle = lipgloss.NewStyle().
 			MarginLeft(1).
@@ -78,6 +70,13 @@ var (
 	colorCanceled  = lipgloss.Color("#808080")
 )
 
+// ansiRegex matches ANSI escape sequences used to strip terminal control codes.
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+func stripANSI(text string) string {
+	return ansiRegex.ReplaceAllString(text, "")
+}
+
 type JobInfo struct {
 	JobID       string
 	JobName     string
@@ -89,12 +88,12 @@ type JobInfo struct {
 	TimeLimit   string
 	AllocCPUS   string
 	AllocTRES   string
-	// StdOutFile  string
+	StdOut      string
 }
 
-// Implement bubble tea List interface
+// Title implements the bubbletea list.Item interface.
 func (j JobInfo) Title() string {
-	var stateStyle lipgloss.Style // Use base style type
+	var stateStyle lipgloss.Style
 	switch j.State {
 	case Running:
 		stateStyle = stateBaseStyle.Background(colorRunning).Foreground(lipgloss.Color("#1C1C1C"))
@@ -109,17 +108,51 @@ func (j JobInfo) Title() string {
 	default:
 		stateStyle = stateBaseStyle.Background(colorUnknown)
 	}
-	// Render the state with its style
-	stateStr := stateStyle.Render(j.State.String())
-	// Prepend styled state to title
-	return fmt.Sprintf("%s %s / %s", stateStr, j.JobID, j.JobName)
+	return fmt.Sprintf("%s %s / %s", stateStyle.Render(j.State.String()), j.JobID, j.JobName)
 }
 
+// Description implements the bubbletea list.Item interface.
 func (j JobInfo) Description() string {
-	// Remove state from description
 	return fmt.Sprintf("%s | %s | %s", j.User, j.Account, j.AllocTRES)
 }
 
+// FilterValue implements the bubbletea list.Item interface.
 func (j JobInfo) FilterValue() string {
 	return j.JobID
+}
+
+// ResolveStdOut resolves SLURM filename pattern variables in the stdout path:
+//   - %u  username
+//   - %A  job array ID (or job ID for non-array jobs)
+//   - %a  job array index (empty for non-array jobs)
+//   - %j  job ID
+//   - %J  job ID with array index (e.g. "12345_1")
+func (j JobInfo) ResolveStdOut() string {
+	if j.StdOut == "" {
+		return ""
+	}
+
+	path := j.StdOut
+
+	username := j.User
+	if u, err := user.Current(); err == nil {
+		username = u.Username
+	}
+
+	// Parse array job ID and index from "12345" or "12345_1"
+	jobID := j.JobID
+	arrayID := jobID
+	arrayIndex := ""
+	if idx := strings.Index(jobID, "_"); idx != -1 {
+		arrayID = jobID[:idx]
+		arrayIndex = jobID[idx+1:]
+	}
+
+	path = strings.ReplaceAll(path, "%u", username)
+	path = strings.ReplaceAll(path, "%A", arrayID)
+	path = strings.ReplaceAll(path, "%a", arrayIndex)
+	path = strings.ReplaceAll(path, "%j", arrayID)
+	path = strings.ReplaceAll(path, "%J", jobID)
+
+	return path
 }

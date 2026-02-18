@@ -1,40 +1,219 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/user"
+	"regexp"
 	"slurmy/slurm"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Add a message type for the timer tick
 type tickMsg time.Time
 
 func tickCmd() tea.Cmd {
-	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
 
+type stdoutUpdateMsg struct {
+	content string
+	filepath string // Track which file this update came from
+}
+
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+func stripANSI(text string) string {
+	return ansiRegex.ReplaceAllString(text, "")
+}
+
+// cleanLine strips ANSI codes, resolves carriage returns to their final visible
+// state (mimicking terminal overwrite behaviour), and removes other control chars.
+func cleanLine(line string) string {
+	line = stripANSI(line)
+	if strings.Contains(line, "\r") {
+		parts := strings.Split(line, "\r")
+		line = parts[len(parts)-1]
+	}
+	line = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' || (r >= 32 && r != 127) {
+			return r
+		}
+		return -1
+	}, line)
+	return line
+}
+
+// readLastLines reads the last maxLines lines from file by seeking backwards in
+// 64 KB chunks — the same strategy used by `tail`. This avoids scanning the
+// whole file and has no per-line size limit.
+func readLastLines(file *os.File, maxLines, maxLineLen int) (lines []string, skipped int, err error) {
+	info, err := file.Stat()
+	if err != nil {
+		return nil, 0, err
+	}
+	if info.Size() == 0 {
+		return nil, 0, nil
+	}
+
+	const chunkSize = 64 * 1024
+	buf := make([]byte, chunkSize)
+	remaining := info.Size()
+	partial := ""
+
+	processLine := func(raw string) {
+		if strings.Contains(raw, "\r") {
+			parts := strings.Split(raw, "\r")
+			raw = parts[len(parts)-1]
+		}
+		raw = cleanLine(raw)
+		if len(raw) > maxLineLen*10 {
+			skipped++
+			return
+		}
+		if len(raw) > maxLineLen {
+			raw = raw[:maxLineLen] + "... [truncated]"
+		}
+		if strings.TrimSpace(raw) != "" {
+			lines = append([]string{raw}, lines...)
+		}
+	}
+
+	for remaining > 0 && len(lines) < maxLines {
+		readSize := int64(chunkSize)
+		if remaining < readSize {
+			readSize = remaining
+		}
+		pos := remaining - readSize
+		if _, err = file.Seek(pos, io.SeekStart); err != nil {
+			return
+		}
+		n, readErr := file.Read(buf[:readSize])
+		if readErr != nil && readErr != io.EOF {
+			err = readErr
+			return
+		}
+		if n == 0 {
+			break
+		}
+
+		chunk := string(buf[:n]) + partial
+		chunkLines := strings.Split(chunk, "\n")
+		partial = chunkLines[0]
+
+		for i := len(chunkLines) - 1; i >= 1 && len(lines) < maxLines; i-- {
+			processLine(chunkLines[i])
+		}
+		remaining -= int64(n)
+	}
+
+	// Handle the very first line of the file
+	if remaining == 0 && partial != "" && len(lines) < maxLines {
+		processLine(partial)
+	}
+
+	return
+}
+
+func readStdoutCmd(filepath string) tea.Cmd {
+	return func() tea.Msg {
+		if filepath == "" {
+			return stdoutUpdateMsg{content: "No stdout file available", filepath: filepath}
+		}
+
+		file, err := os.Open(filepath)
+		if err != nil {
+			return stdoutUpdateMsg{content: fmt.Sprintf("Error opening file: %v", err), filepath: filepath}
+		}
+		defer file.Close()
+
+		const maxLines = 1000
+		const maxLineLen = 10000
+
+		lines, skipped, err := readLastLines(file, maxLines, maxLineLen)
+		if err != nil {
+			// Fallback: forward scan with a large buffer
+			file.Seek(0, io.SeekStart)
+			scanner := bufio.NewScanner(file)
+			scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+			lines = lines[:0]
+			skipped = 0
+			for scanner.Scan() {
+				line := cleanLine(scanner.Text())
+				if len(line) > maxLineLen*10 {
+					skipped++
+					continue
+				}
+				if len(line) > maxLineLen {
+					line = line[:maxLineLen] + "... [truncated]"
+				}
+				if strings.TrimSpace(line) != "" {
+					lines = append(lines, line)
+					if len(lines) > maxLines {
+						lines = lines[1:]
+					}
+				}
+			}
+			if scanErr := scanner.Err(); scanErr != nil {
+				suffix := fmt.Sprintf("\n\n[Warning: %v]", scanErr)
+				if strings.Contains(scanErr.Error(), "token too long") {
+					suffix = "\n\n[Note: some lines exceeded 10 MB and were skipped]"
+				}
+				if len(lines) == 0 {
+					return stdoutUpdateMsg{content: "Error reading file" + suffix, filepath: filepath}
+				}
+				return stdoutUpdateMsg{content: strings.Join(lines, "\n") + suffix, filepath: filepath}
+			}
+		}
+
+		if len(lines) == 0 {
+			return stdoutUpdateMsg{content: "No output yet", filepath: filepath}
+		}
+
+		content := strings.Join(lines, "\n")
+		if skipped > 0 {
+			content += fmt.Sprintf("\n\n[Note: %d line(s) skipped — exceeded size limit]", skipped)
+		}
+		return stdoutUpdateMsg{content: content, filepath: filepath}
+	}
+}
+
+func tailStdoutCmd(filepath string) tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return readStdoutCmd(filepath)()
+	})
+}
+
 type model struct {
-	jobs   list.Model
-	width  int
-	height int
-	user   string
+	jobs          list.Model
+	stdoutView    viewport.Model
+	width         int
+	height        int
+	user          string
+	currentJobID  string
+	currentStdOut string
 }
 
 func (m model) Init() tea.Cmd {
-	// Start the timer on initialization
-	return tickCmd()
+	var stdoutPath string
+	if item, ok := m.jobs.SelectedItem().(slurm.JobInfo); ok {
+		stdoutPath = item.ResolveStdOut()
+		m.currentStdOut = stdoutPath
+	}
+	return tea.Batch(tickCmd(), readStdoutCmd(stdoutPath))
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd // Slice to hold multiple commands
+	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -42,121 +221,150 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		}
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 
-		// Calculate list size (approx 1/3 width)
 		listWidth := m.width / 3
-		// Ensure border fits: width must be at least 2
 		if listWidth < 2 {
 			listWidth = 2
 		}
 
-		// Create the list style temporarily to get its vertical border size
-		listStyle := listStyle.Width(listWidth - 2) // Match the width used in View
-		listVerticalMargin := listStyle.GetVerticalFrameSize()
+		h, v := docStyle.GetFrameSize()
+		lStyle := listStyle.Width(listWidth - 2)
+		m.jobs.SetSize(listWidth-h, m.height-v-lStyle.GetVerticalFrameSize())
 
-		h, v := docStyle.GetFrameSize() // Use docStyle frame size
-		// Adjust height for docStyle frame AND list border
-		m.jobs.SetSize(listWidth-h, m.height-v-listVerticalMargin)
+		detailsWidth := m.width - listWidth
+		availableHeight := m.height - v
+		// details box: 9 content lines + 2 borders + 2 padding
+		// stdout box:  1 title + 2 borders + 2 padding  (viewport fills the rest)
+		detailsHeight := 9 + 2 + 2
+		stdoutExtra := 1 + 2 + 2
+		stdoutHeight := availableHeight - detailsHeight - stdoutExtra
+		if max := int(float64(availableHeight) * 0.6); stdoutHeight > max {
+			stdoutHeight = max
+		}
+		if stdoutHeight < 5 {
+			stdoutHeight = 5
+		}
 
-	// Handle the tick message
+		m.stdoutView.Width = detailsWidth - 4
+		m.stdoutView.Height = stdoutHeight
+		if m.stdoutView.View() == "" {
+			m.stdoutView.SetContent("Loading...")
+		}
+
+	case stdoutUpdateMsg:
+		if msg.filepath == m.currentStdOut {
+			m.stdoutView.SetContent(msg.content)
+			m.stdoutView.GotoBottom()
+			if m.currentStdOut != "" {
+				cmds = append(cmds, tailStdoutCmd(m.currentStdOut))
+			}
+		}
+
 	case tickMsg:
-		// Fetch new job data
 		sacctData, err := slurm.RunSacct(m.user)
 		if err != nil {
-			// Handle error fetching data (e.g., log it, show an error message)
-			// For now, we just continue and wait for the next tick
-			fmt.Fprintf(os.Stderr, "Error fetching sacct data: %v\n", err) // Log to stderr
-			// Restart the timer even if fetching failed
+			fmt.Fprintf(os.Stderr, "sacct error: %v\n", err)
 			cmds = append(cmds, tickCmd())
 		} else {
-			// Convert slurm.JobInfo to []list.Item
 			items := make([]list.Item, len(sacctData.Jobs))
 			for i, job := range sacctData.Jobs {
-				items[i] = job // slurm.JobInfo already implements list.Item
+				items[i] = job
 			}
-			// Update the list items and restart the timer
-			cmds = append(cmds, m.jobs.SetItems(items))
-			cmds = append(cmds, tickCmd())
+			cmds = append(cmds, m.jobs.SetItems(items), tickCmd())
 		}
 	}
 
-	// Update the list model and capture its command
 	var listCmd tea.Cmd
 	m.jobs, listCmd = m.jobs.Update(msg)
-	cmds = append(cmds, listCmd) // Add the list's command
+	cmds = append(cmds, listCmd)
 
-	// Return the updated model and combined commands
+	if item, ok := m.jobs.SelectedItem().(slurm.JobInfo); ok {
+		if item.JobID != m.currentJobID {
+			m.currentJobID = item.JobID
+			m.currentStdOut = item.ResolveStdOut()
+			m.stdoutView.SetContent("Loading...")
+			m.stdoutView.GotoTop()
+			cmds = append(cmds, readStdoutCmd(m.currentStdOut))
+		}
+	}
+
+	var vpCmd tea.Cmd
+	m.stdoutView, vpCmd = m.stdoutView.Update(msg)
+	cmds = append(cmds, vpCmd)
+
 	return m, tea.Batch(cmds...)
 }
 
 func (m model) View() string {
-	listView := m.jobs.View()
-
 	var selectedJob slurm.JobInfo
 	if item, ok := m.jobs.SelectedItem().(slurm.JobInfo); ok {
 		selectedJob = item
 	}
 
-	// Style for labels in the details view
-	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(highlight)
-
-	// Build details string line by line
-	jobIdLine := labelStyle.Render("Job ID:") + " " + selectedJob.JobID
-	nameLine := labelStyle.Render("Name:") + " " + selectedJob.JobName
-	// State is already handled in the list title, but we can show it here too if desired
-	// stateLine := labelStyle.Render("Status:") + " " + selectedJob.State.String()
-	userLine := labelStyle.Render("User:") + " " + selectedJob.User
-	accountLine := labelStyle.Render("Account:") + " " + selectedJob.Account
-	startTimeLine := labelStyle.Render("Start Time:") + " " + selectedJob.StartTime
-	elapsedTimeLine := labelStyle.Render("Elapsed:") + " " + selectedJob.ElapsedTime
-	allocCpusLine := labelStyle.Render("Alloc CPUs:") + " " + selectedJob.AllocCPUS
-	allocTresLine := labelStyle.Render("Alloc TRES:") + " " + selectedJob.AllocTRES
-
-	// Use JoinVertical for better control over details layout
-	detailsContent := lipgloss.JoinVertical(lipgloss.Left,
-		jobIdLine,
-		nameLine,
-		// stateLine, // Uncomment if you want state here too
-		userLine,
-		accountLine,
-		startTimeLine,
-		elapsedTimeLine,
-		allocCpusLine,
-		allocTresLine,
+	label := lipgloss.NewStyle().Bold(true).Foreground(highlight)
+	details := lipgloss.JoinVertical(lipgloss.Left,
+		label.Render("Job ID:")     +" "+selectedJob.JobID,
+		label.Render("Name:")       +" "+selectedJob.JobName,
+		label.Render("User:")       +" "+selectedJob.User,
+		label.Render("Account:")    +" "+selectedJob.Account,
+		label.Render("Start Time:") +" "+selectedJob.StartTime,
+		label.Render("Elapsed:")    +" "+selectedJob.ElapsedTime,
+		label.Render("Alloc CPUs:") +" "+selectedJob.AllocCPUS,
+		label.Render("Alloc TRES:") +" "+selectedJob.AllocTRES,
+		label.Render("StdOut:")     +" "+selectedJob.ResolveStdOut(),
 	)
 
 	listWidth := m.width / 3
 	detailsWidth := m.width - listWidth
-	view := lipgloss.JoinHorizontal(lipgloss.Top,
-		listStyle.Width(listWidth-2).Render(listView),
-		listStyle.Width(detailsWidth-2).Padding(0, 1).Render(detailsContent),
+
+	_, v := docStyle.GetFrameSize()
+	availableHeight := m.height - v
+	detailsHeight := 9 + 2 + 2
+	stdoutExtra := 1 + 2 + 2
+	stdoutHeight := availableHeight - detailsHeight - stdoutExtra
+	if max := int(float64(availableHeight) * 0.6); stdoutHeight > max {
+		stdoutHeight = max
+	}
+	if stdoutHeight < 5 {
+		stdoutHeight = 5
+	}
+
+	stdoutContent := m.stdoutView.View()
+	if stdoutContent == "" {
+		stdoutContent = "No output yet"
+	}
+
+	rightColumn := lipgloss.JoinVertical(lipgloss.Top,
+		listStyle.Width(detailsWidth-2).Padding(0, 1).Render(details),
+		lipgloss.JoinVertical(lipgloss.Top,
+			titleStyle.Render("StdOut (tail -f)"),
+			listStyle.Width(detailsWidth-2).Height(stdoutHeight).Padding(0, 1).Render(stdoutContent),
+		),
 	)
 
-	return docStyle.Render(view)
+	return docStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top,
+		listStyle.Width(listWidth-2).Render(m.jobs.View()),
+		rightColumn,
+	))
 }
 
 func main() {
-	// Get linux user first
 	currentUser, err := user.Current()
 	if err != nil {
-		fmt.Println("Error getting current user:", err)
+		fmt.Fprintln(os.Stderr, "Error getting current user:", err)
 		os.Exit(1)
 	}
-	username := currentUser.Username
 
-	// Fetch initial job data
-	initialSacctData, err := slurm.RunSacct(username)
+	initialSacctData, err := slurm.RunSacct(currentUser.Username)
 	if err != nil {
-		fmt.Printf("Error fetching initial sacct data: %v\n", err)
-		// Decide how to handle initial error, maybe exit or start with empty list
-		// os.Exit(1) // Option: Exit if initial fetch fails
+		fmt.Fprintf(os.Stderr, "Warning: initial sacct fetch failed: %v\n", err)
 	}
 
-	// Prepare initial list items
-	initialJobs := []list.Item{} // Start with empty list if fetch failed or no jobs
+	var initialJobs []list.Item
 	if initialSacctData != nil {
 		initialJobs = make([]list.Item, len(initialSacctData.Jobs))
 		for i, job := range initialSacctData.Jobs {
@@ -164,24 +372,31 @@ func main() {
 		}
 	}
 
-	// Create a delegate and customize its styles
 	delegate := list.NewDefaultDelegate()
 	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.Foreground(highlight).BorderLeftForeground(highlight)
-	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.Foreground(subtle).BorderLeftForeground(highlight) // Keep description subtle
+	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.Foreground(subtle).BorderLeftForeground(highlight)
+
+	vp := viewport.New(0, 0)
+	vp.SetContent("Loading...")
 
 	m := model{
-		jobs: list.New(initialJobs, delegate, 0, 0), // Use fetched jobs
-		user: username,                              // Store username in model
+		jobs:       list.New(initialJobs, delegate, 0, 0),
+		user:       currentUser.Username,
+		stdoutView: vp,
 	}
-	m.jobs.Title = "Your Slurm Jobs (last month)"
-
-	// Style the list title
+	m.jobs.Title = "Your Slurm Jobs (last 30 days)"
 	m.jobs.Styles.Title = titleStyle
 
-	p := tea.NewProgram(m, tea.WithAltScreen()) // Use AltScreen for better TUI experience
-	_, err = p.Run()
-	if err != nil {
-		fmt.Println("Error running program:", err)
+	if len(initialJobs) > 0 {
+		if item, ok := initialJobs[0].(slurm.JobInfo); ok {
+			m.currentJobID = item.JobID
+			m.currentStdOut = item.ResolveStdOut()
+		}
+	}
+
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
 }
