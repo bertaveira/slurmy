@@ -29,9 +29,23 @@ Grab the latest binary from the [Releases](../../releases) page and copy it to y
 
 ```bash
 # Linux amd64 (most clusters)
-wget https://github.com/bertaveira/slurmy/releases/latest/download/slurmy-linux-amd64
-chmod +x slurmy-linux-amd64
-./slurmy-linux-amd64
+wget -O slurmy https://github.com/bertaveira/slurmy/releases/latest/download/slurmy-linux-amd64
+chmod +x slurmy
+./slurmy
+```
+
+### Add to your PATH (optional)
+
+Move the binary to a directory in your `$PATH`, or add an alias to your shell config:
+
+```bash
+# Option 1: Move to ~/bin (create it if needed)
+mkdir -p ~/bin
+mv slurmy ~/bin/
+
+# Option 2: Add an alias to your .bashrc
+echo 'alias slurmy="~/path/to/slurmy"' >> ~/.bashrc
+source ~/.bashrc
 ```
 
 ### Build from source
