@@ -30,6 +30,13 @@ type stdoutUpdateMsg struct {
 	filepath string // Track which file this update came from
 }
 
+type cancelResultMsg struct {
+	jobID string
+	err   error
+}
+
+type clearStatusMsg struct{}
+
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
 func stripANSI(text string) string {
@@ -201,6 +208,12 @@ type model struct {
 	slurmClient   *slurm.Client
 	currentJobID  string
 	currentStdOut string
+
+	// Confirmation modal state
+	showConfirm    bool
+	confirmJobID   string
+	confirmJobName string
+	cancelStatus   string // shows success/error message briefly
 }
 
 func (m model) Init() tea.Cmd {
@@ -217,9 +230,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Handle confirmation modal keys first
+		if m.showConfirm {
+			switch msg.String() {
+			case "y", "Y", "enter":
+				m.showConfirm = false
+				jobID := m.confirmJobID
+				client := m.slurmClient
+				return m, func() tea.Msg {
+					err := client.CancelJob(jobID)
+					return cancelResultMsg{jobID: jobID, err: err}
+				}
+			case "n", "N", "esc", "escape":
+				m.showConfirm = false
+				m.confirmJobID = ""
+				m.confirmJobName = ""
+				return m, nil
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
+		case "c":
+			if item, ok := m.jobs.SelectedItem().(slurm.JobInfo); ok {
+				if item.State == slurm.Running || item.State == slurm.Pending {
+					m.showConfirm = true
+					m.confirmJobID = item.JobID
+					m.confirmJobName = item.JobName
+				}
+			}
+			return m, nil
 		}
 
 	case tea.WindowSizeMsg:
@@ -276,6 +318,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			cmds = append(cmds, m.jobs.SetItems(items), tickCmd())
 		}
+
+	case cancelResultMsg:
+		if msg.err != nil {
+			m.cancelStatus = fmt.Sprintf("Failed to cancel job %s: %v", msg.jobID, msg.err)
+		} else {
+			m.cancelStatus = fmt.Sprintf("Job %s cancelled", msg.jobID)
+		}
+		m.confirmJobID = ""
+		m.confirmJobName = ""
+		cmds = append(cmds, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+			return clearStatusMsg{}
+		}))
+	
+	case clearStatusMsg:
+		m.cancelStatus = ""
 	}
 
 	var listCmd tea.Cmd
@@ -355,10 +412,61 @@ func (m model) View() string {
 		),
 	)
 
-	return docStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top,
+	mainView := docStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top,
 		listStyle.Width(listWidth-2).Render(m.jobs.View()),
 		rightColumn,
 	))
+
+	// Show status message at the bottom if present
+	if m.cancelStatus != "" {
+		statusStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#333333")).
+			Padding(0, 2)
+		mainView = lipgloss.JoinVertical(lipgloss.Left, mainView, statusStyle.Render(m.cancelStatus))
+	}
+
+	// Show confirmation modal overlay
+	if m.showConfirm {
+		modalStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#F5A623")).
+			Padding(1, 2).
+			Width(50).
+			Align(lipgloss.Center)
+
+		modalContent := lipgloss.JoinVertical(lipgloss.Center,
+			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F5A623")).Render("Cancel Job?"),
+			"",
+			fmt.Sprintf("Job ID: %s", m.confirmJobID),
+			fmt.Sprintf("Name: %s", m.confirmJobName),
+			"",
+			lipgloss.NewStyle().Faint(true).Render("[y] Yes  [n] No"),
+		)
+
+		modal := modalStyle.Render(modalContent)
+
+		// Center the modal on screen
+		modalWidth := lipgloss.Width(modal)
+		modalHeight := lipgloss.Height(modal)
+		x := (m.width - modalWidth) / 2
+		y := (m.height - modalHeight) / 2
+		if x < 0 {
+			x = 0
+		}
+		if y < 0 {
+			y = 0
+		}
+
+		modal = lipgloss.NewStyle().
+			MarginLeft(x).
+			MarginTop(y).
+			Render(modal)
+
+		mainView = lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, modal)
+	}
+
+	return mainView
 }
 
 func main() {

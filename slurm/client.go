@@ -153,3 +153,13 @@ func (c *Client) mergeJobs(squeueJobs, sacctJobs []JobInfo) []JobInfo {
 	}
 	return jobs
 }
+
+// CancelJob cancels the job with the given ID using scancel.
+func (c *Client) CancelJob(jobID string) error {
+	cmd := exec.Command("scancel", jobID)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("scancel failed: %w: %s", err, string(output))
+	}
+	return nil
+}

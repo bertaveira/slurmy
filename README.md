@@ -13,6 +13,17 @@ A terminal UI for SLURM. Browse your completed and running jobs, read queued job
 - **ANSI & progress bar stripping** — cleans up tqdm bars and escape codes so the TUI stays readable
 - **SLURM path variables** — resolves `%u`, `%j`, `%J`, `%A`, `%a` in stdout paths automatically
 - **Job details** — shows job ID, name, user, account, start time, elapsed time, allocated CPUs, TRES, node list, and stdout path
+- **Cancel jobs** — press `c` to cancel the selected job (with confirmation prompt)
+
+## Keybindings
+
+| Key | Action |
+|-----|--------|
+| `↑`/`↓` or `j`/`k` | Navigate job list |
+| `c` | Cancel selected job (running/pending only) |
+| `y` | Confirm cancellation |
+| `n` or `Esc` | Dismiss confirmation |
+| `q` or `Ctrl+C` | Quit |
 
 ## Requirements
 
