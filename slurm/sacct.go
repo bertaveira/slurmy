@@ -3,11 +3,8 @@
 package slurm
 
 import (
-	"os/exec"
 	"regexp"
-	"slices"
 	"strings"
-	"time"
 )
 
 // ANSI escape sequence regex (local to this file)
@@ -84,25 +81,3 @@ func parseJob(fields []string, fieldNames []string) JobInfo {
 	return job
 }
 
-func RunSacct(username string) (*Sacct, error) {
-	startDate := time.Now().AddDate(0, 0, -30).Format("2006-01-02")
-
-	cmd := exec.Command("sacct",
-		"--allocations",
-		"--format=JobID%-30,JobName%-50,User,Account%-30,State,Start,Elapsed,Timelimit,AllocCPUS,AllocTRES%-100,NodeList%-80,StdOut%-200",
-		"--user", username,
-		"--starttime", startDate,
-	)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, err
-	}
-
-	sacct := &Sacct{}
-	if err := sacct.Parse(string(output)); err != nil {
-		return nil, err
-	}
-
-	slices.Reverse(sacct.Jobs)
-	return sacct, nil
-}

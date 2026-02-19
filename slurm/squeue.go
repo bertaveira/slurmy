@@ -5,10 +5,10 @@ import (
 	"strings"
 )
 
-// RunSqueue fetches pending jobs for the given user via squeue and returns
+// runSqueue fetches pending jobs for the given user via squeue and returns
 // them as JobInfo values. Only PENDING jobs are returned — running jobs are
 // already covered by sacct with richer data.
-func RunSqueue(username string) ([]JobInfo, error) {
+func runSqueue(username string) ([]JobInfo, error) {
 	cmd := exec.Command("squeue",
 		"--user", username,
 		"--noheader",

@@ -26,7 +26,7 @@ func tickCmd() tea.Cmd {
 }
 
 type stdoutUpdateMsg struct {
-	content string
+	content  string
 	filepath string // Track which file this update came from
 }
 
@@ -198,7 +198,7 @@ type model struct {
 	stdoutView    viewport.Model
 	width         int
 	height        int
-	user          string
+	slurmClient   *slurm.Client
 	currentJobID  string
 	currentStdOut string
 }
@@ -265,13 +265,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tickMsg:
-		sacctData, err := slurm.RunSacct(m.user)
+		jobs, err := m.slurmClient.GetJobs()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "sacct error: %v\n", err)
 			cmds = append(cmds, tickCmd())
 		} else {
-			squeueJobs, _ := slurm.RunSqueue(m.user)
-			items := mergeJobs(squeueJobs, sacctData.Jobs)
+			items := make([]list.Item, len(jobs))
+			for i, job := range jobs {
+				items[i] = job
+			}
 			cmds = append(cmds, m.jobs.SetItems(items), tickCmd())
 		}
 	}
@@ -313,15 +315,15 @@ func (m model) View() string {
 		node = "—"
 	}
 	details := lipgloss.JoinVertical(lipgloss.Left,
-		label.Render("Job ID:")     +" "+selectedJob.JobID,
-		label.Render("Name:")       +" "+selectedJob.JobName,
-		label.Render("User:")       +" "+selectedJob.User,
-		label.Render("Account:")    +" "+selectedJob.Account,
-		label.Render("Start Time:") +" "+selectedJob.StartTime,
-		label.Render("Elapsed:")    +" "+selectedJob.ElapsedTime,
-		label.Render("Alloc CPUs:") +" "+selectedJob.AllocCPUS,
-		label.Render("Alloc TRES:") +" "+selectedJob.AllocTRES,
-		label.Render("Node:")       +" "+node,
+		label.Render("Job ID:")+" "+selectedJob.JobID,
+		label.Render("Name:")+" "+selectedJob.JobName,
+		label.Render("User:")+" "+selectedJob.User,
+		label.Render("Account:")+" "+selectedJob.Account,
+		label.Render("Start Time:")+" "+selectedJob.StartTime,
+		label.Render("Elapsed:")+" "+selectedJob.ElapsedTime,
+		label.Render("Alloc CPUs:")+" "+selectedJob.AllocCPUS,
+		label.Render("Alloc TRES:")+" "+selectedJob.AllocTRES,
+		label.Render("Node:")+" "+node,
 		lastDetailRow,
 	)
 
@@ -359,27 +361,6 @@ func (m model) View() string {
 	))
 }
 
-// mergeJobs combines pending jobs from squeue with historical jobs from sacct.
-// squeue jobs come first (pending at the top); duplicates are deduplicated by JobID.
-func mergeJobs(squeueJobs []slurm.JobInfo, sacctJobs []slurm.JobInfo) []list.Item {
-	seen := make(map[string]bool, len(sacctJobs))
-	items := make([]list.Item, 0, len(squeueJobs)+len(sacctJobs))
-
-	for _, job := range squeueJobs {
-		if !seen[job.JobID] {
-			seen[job.JobID] = true
-			items = append(items, job)
-		}
-	}
-	for _, job := range sacctJobs {
-		if !seen[job.JobID] {
-			seen[job.JobID] = true
-			items = append(items, job)
-		}
-	}
-	return items
-}
-
 func main() {
 	currentUser, err := user.Current()
 	if err != nil {
@@ -387,18 +368,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	initialSacctData, err := slurm.RunSacct(currentUser.Username)
+	slurmClient, err := slurm.NewClient(currentUser.Username)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: initial sacct fetch failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error initializing SLURM client: %v\n", err)
+		os.Exit(1)
 	}
 
-	initialSqueueJobs, _ := slurm.RunSqueue(currentUser.Username)
+	initialJobInfos, err := slurmClient.GetJobs()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: initial job fetch failed: %v\n", err)
+	}
 
-	var initialJobs []list.Item
-	if initialSacctData != nil {
-		initialJobs = mergeJobs(initialSqueueJobs, initialSacctData.Jobs)
-	} else if len(initialSqueueJobs) > 0 {
-		initialJobs = mergeJobs(initialSqueueJobs, nil)
+	initialJobs := make([]list.Item, len(initialJobInfos))
+	for i, job := range initialJobInfos {
+		initialJobs[i] = job
 	}
 
 	delegate := list.NewDefaultDelegate()
@@ -409,9 +392,9 @@ func main() {
 	vp.SetContent("Loading...")
 
 	m := model{
-		jobs:       list.New(initialJobs, delegate, 0, 0),
-		user:       currentUser.Username,
-		stdoutView: vp,
+		jobs:        list.New(initialJobs, delegate, 0, 0),
+		slurmClient: slurmClient,
+		stdoutView:  vp,
 	}
 	m.jobs.Title = "Your Slurm Jobs (last 30 days)"
 	m.jobs.Styles.Title = titleStyle
