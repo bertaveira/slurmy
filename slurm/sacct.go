@@ -28,23 +28,42 @@ func cleanField(field string) string {
 	return strings.TrimSpace(field)
 }
 
-func (s *Sacct) Parse(output string) error {
+// ParseParsable parses sacct output in --parsable2 format (pipe-delimited).
+func (s *Sacct) ParseParsable(output string) error {
+	lines := strings.Split(output, "\n")
+	if len(lines) == 0 {
+		return nil
+	}
+
+	// First line is the header
 	var fieldNames []string
-
-	for _, line := range strings.Split(output, "\n") {
-		if line == "" || strings.Contains(line, "-----") {
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
-		if strings.Contains(line, "JobID") {
-			fieldNames = strings.Fields(line)
+		fieldNames = strings.Split(line, "|")
+		break
+	}
+
+	if len(fieldNames) == 0 {
+		return nil
+	}
+
+	for _, line := range lines[1:] {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
 
-		fields := strings.Fields(line)
+		fields := strings.Split(line, "|")
 
-		// Skip job-step lines (e.g. "12345.batch", "12345.extern")
-		if len(fields) > 0 && (strings.Contains(fields[0], ".ba") || strings.Contains(fields[0], ".ex")) {
-			continue
+		// Skip job-step lines (e.g. "12345.batch", "12345.extern", "12345.interactive")
+		if len(fields) > 0 {
+			jobID := fields[0]
+			if strings.Contains(jobID, ".") {
+				continue
+			}
 		}
 
 		if len(fields) != len(fieldNames) {

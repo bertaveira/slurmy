@@ -10,22 +10,19 @@ import (
 
 // desiredFields lists the sacct fields the app wants, in order of priority.
 // Fields not available on this cluster will be skipped.
-var desiredFields = []struct {
-	Name  string
-	Width int
-}{
-	{"JobID", 30},
-	{"JobName", 50},
-	{"User", 0},
-	{"Account", 30},
-	{"State", 0},
-	{"Start", 0},
-	{"Elapsed", 0},
-	{"Timelimit", 0},
-	{"AllocCPUS", 0},
-	{"AllocTRES", 100},
-	{"NodeList", 80},
-	{"StdOut", 200},
+var desiredFields = []string{
+	"JobID",
+	"JobName",
+	"User",
+	"Account",
+	"State",
+	"Start",
+	"Elapsed",
+	"Timelimit",
+	"AllocCPUS",
+	"AllocTRES",
+	"NodeList",
+	"StdOut",
 }
 
 // Client handles all SLURM interactions and maintains state like available fields.
@@ -75,13 +72,9 @@ func (c *Client) detectAvailableFields() error {
 // buildFormatString creates the --format argument using only available fields.
 func (c *Client) buildFormatString() {
 	var parts []string
-	for _, f := range desiredFields {
-		if c.AvailableFields[f.Name] {
-			if f.Width > 0 {
-				parts = append(parts, fmt.Sprintf("%s%%-%d", f.Name, f.Width))
-			} else {
-				parts = append(parts, f.Name)
-			}
+	for _, name := range desiredFields {
+		if c.AvailableFields[name] {
+			parts = append(parts, name)
 		}
 	}
 	c.formatString = strings.Join(parts, ",")
@@ -115,6 +108,7 @@ func (c *Client) runSacct() ([]JobInfo, error) {
 
 	cmd := exec.Command("sacct",
 		"--allocations",
+		"--parsable2",
 		"--format="+c.formatString,
 		"--user", c.Username,
 		"--starttime", startDate,
@@ -125,7 +119,7 @@ func (c *Client) runSacct() ([]JobInfo, error) {
 	}
 
 	sacct := &Sacct{}
-	if err := sacct.Parse(string(output)); err != nil {
+	if err := sacct.ParseParsable(string(output)); err != nil {
 		return nil, err
 	}
 
