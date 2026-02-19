@@ -2,7 +2,7 @@
 
 A terminal UI for SLURM. Browse your completed and running jobs, read queued jobs, and tail stdout — all without leaving the terminal.
 
-![demo placeholder](https://img.shields.io/badge/TUI-SLURM-blue)
+![demo2](https://github.com/user-attachments/assets/98c96feb-2544-4916-95cd-2cfe42157216)
 
 ## Features
 
