@@ -6,6 +6,9 @@ A terminal UI for SLURM. Browse your completed and running jobs, read queued job
 
 ## Features
 
+- **Tabbed interface** — switch between **Jobs**, **Cluster**, and **Users** with `tab` or `1`/`2`/`3`
+- **Cluster tab** — at-a-glance GPU summary (used / free / down) plus a colour-coded grid of every node showing its state, per-GPU allocation bar, and CPU usage (data from `sinfo`)
+- **Users tab** — ranked bar chart of how many GPUs each user is running (and how many they have queued), aggregated from `squeue` across the whole cluster
 - **Job list** — shows jobs from the last 30 days via `sacct`, refreshed every 2 seconds
 - **Pending jobs at the top** — pulls queued jobs from `squeue` and prepends them with their wait reason (e.g. `Resources`, `Priority`)
 - **Live stdout tail** — right-hand panel tails the job's stdout file like `tail -f`, updating every second
@@ -19,15 +22,17 @@ A terminal UI for SLURM. Browse your completed and running jobs, read queued job
 
 | Key | Action |
 |-----|--------|
-| `↑`/`↓` or `j`/`k` | Navigate job list |
-| `c` | Cancel selected job (running/pending only) |
+| `tab` / `shift+tab` | Cycle between tabs (Jobs / Cluster / Users) |
+| `1` / `2` / `3` | Jump straight to a tab |
+| `↑`/`↓` or `j`/`k` | Navigate job list / scroll the active tab |
+| `c` | Cancel selected job (Jobs tab, running/pending only) |
 | `y` | Confirm cancellation |
 | `n` or `Esc` | Dismiss confirmation |
 | `q` or `Ctrl+C` | Quit |
 
 ## Requirements
 
-- A SLURM environment with `sacct` and `squeue` in `$PATH`
+- A SLURM environment with `sacct`, `squeue`, and `sinfo` in `$PATH`
 - Terminal with 256-colour support
 
 No Go toolchain needed on the cluster — just copy the pre-built binary.
