@@ -100,4 +100,3 @@ func parseJob(fields []string, fieldNames []string) JobInfo {
 	}
 	return job
 }
-

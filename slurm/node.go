@@ -79,6 +79,10 @@ type ClusterSummary struct {
 // aggregate summary. Every requested sinfo field is a single whitespace-free
 // token, so each line splits cleanly into the expected columns.
 func (c *Client) GetNodes() ([]NodeInfo, ClusterSummary, error) {
+	if c.Demo {
+		return c.demoNodes, c.demoSum, nil
+	}
+
 	cmd := exec.Command("sinfo",
 		"--Node",
 		"--noheader",
@@ -90,7 +94,6 @@ func (c *Client) GetNodes() ([]NodeInfo, ClusterSummary, error) {
 	}
 
 	var nodes []NodeInfo
-	var summary ClusterSummary
 
 	for _, line := range strings.Split(string(output), "\n") {
 		line = strings.TrimSpace(line)
@@ -111,7 +114,7 @@ func (c *Client) GetNodes() ([]NodeInfo, ClusterSummary, error) {
 		gpuUsed, _ := parseGres(fields[3])
 		cpuAlloc, cpuTotal := parseCPUsState(fields[4])
 
-		node := NodeInfo{
+		nodes = append(nodes, NodeInfo{
 			Name:       fields[0],
 			State:      fields[1],
 			GPUTotal:   gpuTotal,
@@ -122,9 +125,16 @@ func (c *Client) GetNodes() ([]NodeInfo, ClusterSummary, error) {
 			Partition:  fields[5],
 			MemTotalMB: atoiSafe(fields[6]),
 			MemFreeMB:  atoiSafe(fields[7]),
-		}
-		nodes = append(nodes, node)
+		})
+	}
 
+	return nodes, summarize(nodes), nil
+}
+
+// summarize aggregates resource usage across a set of nodes.
+func summarize(nodes []NodeInfo) ClusterSummary {
+	var summary ClusterSummary
+	for _, node := range nodes {
 		summary.NodesTotal++
 		summary.GPUTotal += node.GPUTotal
 		summary.CPUAlloc += node.CPUAlloc
@@ -138,8 +148,7 @@ func (c *Client) GetNodes() ([]NodeInfo, ClusterSummary, error) {
 			summary.GPUUnavailable += node.GPUTotal
 		}
 	}
-
-	return nodes, summary, nil
+	return summary
 }
 
 // parseGres extracts the GPU count and type from a Gres / GresUsed string such

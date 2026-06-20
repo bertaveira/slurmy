@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -495,7 +496,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 			return clearStatusMsg{}
 		}))
-	
+
 	case clearStatusMsg:
 		m.cancelStatus = ""
 	}
@@ -700,16 +701,24 @@ func (m model) View() string {
 }
 
 func main() {
-	currentUser, err := user.Current()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error getting current user:", err)
-		os.Exit(1)
-	}
+	demo := flag.Bool("demo", false, "run with synthetic data (no SLURM required) for screenshots/recordings")
+	flag.Parse()
 
-	slurmClient, err := slurm.NewClient(currentUser.Username)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error initializing SLURM client: %v\n", err)
-		os.Exit(1)
+	var slurmClient *slurm.Client
+	if *demo {
+		slurmClient = slurm.NewDemoClient()
+	} else {
+		currentUser, err := user.Current()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Error getting current user:", err)
+			os.Exit(1)
+		}
+
+		slurmClient, err = slurm.NewClient(currentUser.Username)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error initializing SLURM client: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	initialJobInfos, err := slurmClient.GetJobs()
