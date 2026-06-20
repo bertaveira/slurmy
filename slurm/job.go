@@ -90,6 +90,7 @@ type JobInfo struct {
 	AllocTRES   string
 	NodeList    string
 	StdOut      string
+	StdErr      string
 	Reason      string // pending reason from squeue (e.g. "Resources", "Priority")
 }
 
@@ -131,18 +132,29 @@ func (j JobInfo) FilterValue() string {
 	return j.JobID
 }
 
-// ResolveStdOut resolves SLURM filename pattern variables in the stdout path:
+// ResolveStdOut resolves SLURM filename pattern variables in the stdout path.
+// See resolvePattern for the list of supported variables.
+func (j JobInfo) ResolveStdOut() string {
+	return j.resolvePattern(j.StdOut)
+}
+
+// ResolveStdErr resolves SLURM filename pattern variables in the stderr path.
+// SLURM often merges stderr into stdout (empty StdErr); callers should treat an
+// empty result as "no separate stderr file".
+func (j JobInfo) ResolveStdErr() string {
+	return j.resolvePattern(j.StdErr)
+}
+
+// resolvePattern resolves SLURM filename pattern variables in a path:
 //   - %u  username
 //   - %A  job array ID (or job ID for non-array jobs)
 //   - %a  job array index (empty for non-array jobs)
 //   - %j  job ID
 //   - %J  job ID with array index (e.g. "12345_1")
-func (j JobInfo) ResolveStdOut() string {
-	if j.StdOut == "" {
+func (j JobInfo) resolvePattern(path string) string {
+	if path == "" {
 		return ""
 	}
-
-	path := j.StdOut
 
 	username := j.User
 	if u, err := user.Current(); err == nil {

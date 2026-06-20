@@ -23,6 +23,7 @@ var desiredFields = []string{
 	"AllocTRES",
 	"NodeList",
 	"StdOut",
+	"StdErr",
 }
 
 // Client handles all SLURM interactions and maintains state like available fields.

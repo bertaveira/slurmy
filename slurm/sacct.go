@@ -96,6 +96,7 @@ func parseJob(fields []string, fieldNames []string) JobInfo {
 		AllocTRES:   cleanField(m["AllocTRES"]),
 		NodeList:    cleanField(m["NodeList"]),
 		StdOut:      cleanField(m["StdOut"]),
+		StdErr:      cleanField(m["StdErr"]),
 	}
 	return job
 }
