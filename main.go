@@ -37,6 +37,31 @@ type cancelResultMsg struct {
 
 type clearStatusMsg struct{}
 
+type nodesMsg struct {
+	nodes   []slurm.NodeInfo
+	summary slurm.ClusterSummary
+	err     error
+}
+
+type usageMsg struct {
+	usages []slurm.UserUsage
+	err    error
+}
+
+func fetchNodesCmd(c *slurm.Client) tea.Cmd {
+	return func() tea.Msg {
+		nodes, summary, err := c.GetNodes()
+		return nodesMsg{nodes: nodes, summary: summary, err: err}
+	}
+}
+
+func fetchUsageCmd(c *slurm.Client) tea.Cmd {
+	return func() tea.Msg {
+		usages, err := c.GetUserUsage()
+		return usageMsg{usages: usages, err: err}
+	}
+}
+
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
 func stripANSI(text string) string {
@@ -209,11 +234,36 @@ type model struct {
 	currentJobID  string
 	currentStdOut string
 
+	// Tabs
+	activeTab   tab
+	clusterView viewport.Model
+	usersView   viewport.Model
+
+	// Cluster tab data
+	nodes      []slurm.NodeInfo
+	clusterSum slurm.ClusterSummary
+	clusterErr error
+
+	// Users tab data
+	usages   []slurm.UserUsage
+	usageErr error
+
 	// Confirmation modal state
 	showConfirm    bool
 	confirmJobID   string
 	confirmJobName string
 	cancelStatus   string // shows success/error message briefly
+}
+
+// refreshTabCmd returns the data-fetch command for the active tab (if any).
+func (m model) refreshTabCmd() tea.Cmd {
+	switch m.activeTab {
+	case tabCluster:
+		return fetchNodesCmd(m.slurmClient)
+	case tabUsers:
+		return fetchUsageCmd(m.slurmClient)
+	}
+	return nil
 }
 
 func (m model) Init() tea.Cmd {
@@ -250,15 +300,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Tab switching — ignore while the job list filter is being typed.
+		if m.jobs.FilterState() != list.Filtering {
+			switch msg.String() {
+			case "tab":
+				m.activeTab = (m.activeTab + 1) % 3
+				return m, m.refreshTabCmd()
+			case "shift+tab":
+				m.activeTab = (m.activeTab + 2) % 3
+				return m, m.refreshTabCmd()
+			case "1":
+				m.activeTab = tabJobs
+				return m, nil
+			case "2":
+				m.activeTab = tabCluster
+				return m, m.refreshTabCmd()
+			case "3":
+				m.activeTab = tabUsers
+				return m, m.refreshTabCmd()
+			}
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		case "c":
-			if item, ok := m.jobs.SelectedItem().(slurm.JobInfo); ok {
-				if item.State == slurm.Running || item.State == slurm.Pending {
-					m.showConfirm = true
-					m.confirmJobID = item.JobID
-					m.confirmJobName = item.JobName
+			if m.activeTab == tabJobs {
+				if item, ok := m.jobs.SelectedItem().(slurm.JobInfo); ok {
+					if item.State == slurm.Running || item.State == slurm.Pending {
+						m.showConfirm = true
+						m.confirmJobID = item.JobID
+						m.confirmJobName = item.JobName
+					}
 				}
 			}
 			return m, nil
@@ -275,10 +348,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		h, v := docStyle.GetFrameSize()
 		lStyle := listStyle.Width(listWidth - 2)
-		m.jobs.SetSize(listWidth-h, m.height-v-lStyle.GetVerticalFrameSize())
+		m.jobs.SetSize(listWidth-h, m.height-v-tabBarHeight-lStyle.GetVerticalFrameSize())
 
 		detailsWidth := m.width - listWidth
-		availableHeight := m.height - v
+		availableHeight := m.height - v - tabBarHeight
 		// details box: 10 content lines + 2 borders + 2 padding
 		// stdout box:  1 title + 2 borders + 2 padding  (viewport fills the rest)
 		detailsHeight := 10 + 2 + 2
@@ -296,6 +369,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.stdoutView.View() == "" {
 			m.stdoutView.SetContent("Loading...")
 		}
+
+		// Full-width viewports for the Cluster and Users tabs, below the tab bar.
+		tabContentWidth := m.width - h
+		if tabContentWidth < 10 {
+			tabContentWidth = 10
+		}
+		tabContentHeight := availableHeight - 2 // tab bar + spacer
+		if tabContentHeight < 3 {
+			tabContentHeight = 3
+		}
+		m.clusterView.Width = tabContentWidth
+		m.clusterView.Height = tabContentHeight
+		m.usersView.Width = tabContentWidth
+		m.usersView.Height = tabContentHeight
+		m.clusterView.SetContent(renderClusterView(m.nodes, m.clusterSum, m.clusterErr, tabContentWidth))
+		m.usersView.SetContent(renderUsersView(m.usages, m.usageErr, tabContentWidth))
+
+	case nodesMsg:
+		m.nodes = msg.nodes
+		m.clusterSum = msg.summary
+		m.clusterErr = msg.err
+		m.clusterView.SetContent(renderClusterView(m.nodes, m.clusterSum, m.clusterErr, m.clusterView.Width))
+
+	case usageMsg:
+		m.usages = msg.usages
+		m.usageErr = msg.err
+		m.usersView.SetContent(renderUsersView(m.usages, m.usageErr, m.usersView.Width))
 
 	case stdoutUpdateMsg:
 		if msg.filepath == m.currentStdOut {
@@ -318,6 +418,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			cmds = append(cmds, m.jobs.SetItems(items), tickCmd())
 		}
+		// Keep the active tab's data fresh too.
+		if c := m.refreshTabCmd(); c != nil {
+			cmds = append(cmds, c)
+		}
 
 	case cancelResultMsg:
 		if msg.err != nil {
@@ -335,23 +439,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cancelStatus = ""
 	}
 
-	var listCmd tea.Cmd
-	m.jobs, listCmd = m.jobs.Update(msg)
-	cmds = append(cmds, listCmd)
+	// Keyboard input is routed only to the active tab's widgets; all other
+	// messages (resize, ticks) propagate to every widget so they stay current.
+	_, isKey := msg.(tea.KeyMsg)
 
-	if item, ok := m.jobs.SelectedItem().(slurm.JobInfo); ok {
-		if item.JobID != m.currentJobID {
-			m.currentJobID = item.JobID
-			m.currentStdOut = item.ResolveStdOut()
-			m.stdoutView.SetContent("Loading...")
-			m.stdoutView.GotoTop()
-			cmds = append(cmds, readStdoutCmd(m.currentStdOut))
+	if !isKey || m.activeTab == tabJobs {
+		var listCmd tea.Cmd
+		m.jobs, listCmd = m.jobs.Update(msg)
+		cmds = append(cmds, listCmd)
+
+		if item, ok := m.jobs.SelectedItem().(slurm.JobInfo); ok {
+			if item.JobID != m.currentJobID {
+				m.currentJobID = item.JobID
+				m.currentStdOut = item.ResolveStdOut()
+				m.stdoutView.SetContent("Loading...")
+				m.stdoutView.GotoTop()
+				cmds = append(cmds, readStdoutCmd(m.currentStdOut))
+			}
 		}
+
+		var vpCmd tea.Cmd
+		m.stdoutView, vpCmd = m.stdoutView.Update(msg)
+		cmds = append(cmds, vpCmd)
 	}
 
-	var vpCmd tea.Cmd
-	m.stdoutView, vpCmd = m.stdoutView.Update(msg)
-	cmds = append(cmds, vpCmd)
+	if !isKey || m.activeTab == tabCluster {
+		var cvCmd tea.Cmd
+		m.clusterView, cvCmd = m.clusterView.Update(msg)
+		cmds = append(cmds, cvCmd)
+	}
+
+	if !isKey || m.activeTab == tabUsers {
+		var uvCmd tea.Cmd
+		m.usersView, uvCmd = m.usersView.Update(msg)
+		cmds = append(cmds, uvCmd)
+	}
 
 	return m, tea.Batch(cmds...)
 }
@@ -388,7 +510,7 @@ func (m model) View() string {
 	detailsWidth := m.width - listWidth
 
 	_, v := docStyle.GetFrameSize()
-	availableHeight := m.height - v
+	availableHeight := m.height - v - tabBarHeight
 	detailsHeight := 10 + 2 + 2
 	stdoutExtra := 1 + 2 + 2
 	stdoutHeight := availableHeight - detailsHeight - stdoutExtra
@@ -412,10 +534,21 @@ func (m model) View() string {
 		),
 	)
 
-	mainView := docStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top,
-		listStyle.Width(listWidth-2).Render(m.jobs.View()),
-		rightColumn,
-	))
+	var body string
+	switch m.activeTab {
+	case tabCluster:
+		body = m.clusterView.View()
+	case tabUsers:
+		body = m.usersView.View()
+	default:
+		body = lipgloss.JoinHorizontal(lipgloss.Top,
+			listStyle.Width(listWidth-2).Render(m.jobs.View()),
+			rightColumn,
+		)
+	}
+
+	tabBar := renderTabBar(m.activeTab, m.width)
+	mainView := docStyle.Render(lipgloss.JoinVertical(lipgloss.Left, tabBar, "", body))
 
 	// Show status message at the bottom if present
 	if m.cancelStatus != "" {
@@ -499,10 +632,17 @@ func main() {
 	vp := viewport.New(0, 0)
 	vp.SetContent("Loading...")
 
+	clusterVP := viewport.New(0, 0)
+	clusterVP.SetContent("Loading cluster status…")
+	usersVP := viewport.New(0, 0)
+	usersVP.SetContent("Loading user usage…")
+
 	m := model{
 		jobs:        list.New(initialJobs, delegate, 0, 0),
 		slurmClient: slurmClient,
 		stdoutView:  vp,
+		clusterView: clusterVP,
+		usersView:   usersVP,
 	}
 	m.jobs.Title = "Your Slurm Jobs (last 30 days)"
 	m.jobs.Styles.Title = titleStyle
