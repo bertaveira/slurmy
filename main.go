@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -226,13 +227,17 @@ func tailStdoutCmd(filepath string) tea.Cmd {
 }
 
 type model struct {
-	jobs          list.Model
-	stdoutView    viewport.Model
-	width         int
-	height        int
-	slurmClient   *slurm.Client
-	currentJobID  string
-	currentStdOut string
+	jobs         list.Model
+	stdoutView   viewport.Model
+	width        int
+	height       int
+	slurmClient  *slurm.Client
+	currentJobID string
+	currentFile  string // resolved path of the stream currently being tailed
+
+	// Output pane state
+	showStderr    bool // tail stderr instead of stdout
+	outputFocused bool // output pane has focus for scrolling (auto-tail paused)
 
 	// Tabs
 	activeTab   tab
@@ -255,6 +260,28 @@ type model struct {
 	cancelStatus   string // shows success/error message briefly
 }
 
+// streamPath returns the resolved path of the active output stream (stdout or
+// stderr) for the given job.
+func (m model) streamPath(j slurm.JobInfo) string {
+	if m.showStderr {
+		return j.ResolveStdErr()
+	}
+	return j.ResolveStdOut()
+}
+
+// loadStreamCmd switches the output pane to the active stream of the selected
+// job and returns the command that reads it. It resets the viewport to the top
+// and clears focus-scroll so the new stream tails from the bottom.
+func (m *model) loadStreamCmd() tea.Cmd {
+	m.currentFile = ""
+	if item, ok := m.jobs.SelectedItem().(slurm.JobInfo); ok {
+		m.currentFile = m.streamPath(item)
+	}
+	m.stdoutView.SetContent("Loading...")
+	m.stdoutView.GotoTop()
+	return readStdoutCmd(m.currentFile)
+}
+
 // refreshTabCmd returns the data-fetch command for the active tab (if any).
 func (m model) refreshTabCmd() tea.Cmd {
 	switch m.activeTab {
@@ -270,7 +297,7 @@ func (m model) Init() tea.Cmd {
 	var stdoutPath string
 	if item, ok := m.jobs.SelectedItem().(slurm.JobInfo); ok {
 		stdoutPath = item.ResolveStdOut()
-		m.currentStdOut = stdoutPath
+		m.currentFile = stdoutPath
 	}
 	return tea.Batch(tickCmd(), readStdoutCmd(stdoutPath))
 }
@@ -321,6 +348,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Output-pane keys (Jobs tab only, not while filtering the job list).
+		if m.activeTab == tabJobs && m.jobs.FilterState() != list.Filtering {
+			switch msg.String() {
+			case "o":
+				if m.showStderr {
+					m.showStderr = false
+					return m, m.loadStreamCmd()
+				}
+				return m, nil
+			case "e":
+				if !m.showStderr {
+					m.showStderr = true
+					return m, m.loadStreamCmd()
+				}
+				return m, nil
+			case "enter":
+				m.outputFocused = !m.outputFocused
+				return m, nil
+			case "esc", "escape":
+				if m.outputFocused {
+					m.outputFocused = false
+					m.stdoutView.GotoBottom() // resume following the latest output
+					return m, nil
+				}
+			}
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
@@ -352,9 +406,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		detailsWidth := m.width - listWidth
 		availableHeight := m.height - v - tabBarHeight
-		// details box: 10 content lines + 2 borders + 2 padding
+		// details box: 11 content lines + 2 borders + 2 padding
 		// stdout box:  1 title + 2 borders + 2 padding  (viewport fills the rest)
-		detailsHeight := 10 + 2 + 2
+		detailsHeight := 11 + 2 + 2
 		stdoutExtra := 1 + 2 + 2
 		stdoutHeight := availableHeight - detailsHeight - stdoutExtra
 		if max := int(float64(availableHeight) * 0.6); stdoutHeight > max {
@@ -398,11 +452,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.usersView.SetContent(renderUsersView(m.usages, m.usageErr, m.usersView.Width))
 
 	case stdoutUpdateMsg:
-		if msg.filepath == m.currentStdOut {
+		if msg.filepath == m.currentFile {
+			// Follow the latest output unless the user has scrolled up in the
+			// focused pane — then hold their scroll position.
+			prevOffset := m.stdoutView.YOffset
+			wasAtBottom := m.stdoutView.AtBottom()
 			m.stdoutView.SetContent(msg.content)
-			m.stdoutView.GotoBottom()
-			if m.currentStdOut != "" {
-				cmds = append(cmds, tailStdoutCmd(m.currentStdOut))
+			if !m.outputFocused || wasAtBottom {
+				m.stdoutView.GotoBottom()
+			} else {
+				m.stdoutView.SetYOffset(prevOffset)
+			}
+			if m.currentFile != "" {
+				cmds = append(cmds, tailStdoutCmd(m.currentFile))
 			}
 		}
 
@@ -434,7 +496,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 			return clearStatusMsg{}
 		}))
-	
+
 	case clearStatusMsg:
 		m.cancelStatus = ""
 	}
@@ -444,23 +506,34 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	_, isKey := msg.(tea.KeyMsg)
 
 	if !isKey || m.activeTab == tabJobs {
-		var listCmd tea.Cmd
-		m.jobs, listCmd = m.jobs.Update(msg)
-		cmds = append(cmds, listCmd)
+		// When the output pane is focused, keystrokes scroll it instead of
+		// moving the job-list selection.
+		if isKey && m.outputFocused {
+			var vpCmd tea.Cmd
+			m.stdoutView, vpCmd = m.stdoutView.Update(msg)
+			cmds = append(cmds, vpCmd)
+		} else {
+			var listCmd tea.Cmd
+			m.jobs, listCmd = m.jobs.Update(msg)
+			cmds = append(cmds, listCmd)
 
-		if item, ok := m.jobs.SelectedItem().(slurm.JobInfo); ok {
-			if item.JobID != m.currentJobID {
-				m.currentJobID = item.JobID
-				m.currentStdOut = item.ResolveStdOut()
-				m.stdoutView.SetContent("Loading...")
-				m.stdoutView.GotoTop()
-				cmds = append(cmds, readStdoutCmd(m.currentStdOut))
+			if item, ok := m.jobs.SelectedItem().(slurm.JobInfo); ok {
+				if item.JobID != m.currentJobID {
+					m.currentJobID = item.JobID
+					m.currentFile = m.streamPath(item)
+					m.stdoutView.SetContent("Loading...")
+					m.stdoutView.GotoTop()
+					cmds = append(cmds, readStdoutCmd(m.currentFile))
+				}
+			}
+
+			// Non-key messages (resize, etc.) still reach the viewport.
+			if !isKey {
+				var vpCmd tea.Cmd
+				m.stdoutView, vpCmd = m.stdoutView.Update(msg)
+				cmds = append(cmds, vpCmd)
 			}
 		}
-
-		var vpCmd tea.Cmd
-		m.stdoutView, vpCmd = m.stdoutView.Update(msg)
-		cmds = append(cmds, vpCmd)
 	}
 
 	if !isKey || m.activeTab == tabCluster {
@@ -485,9 +558,29 @@ func (m model) View() string {
 	}
 
 	label := lipgloss.NewStyle().Bold(true).Foreground(highlight)
-	lastDetailRow := label.Render("StdOut:") + " " + selectedJob.ResolveStdOut()
+	faint := lipgloss.NewStyle().Faint(true)
+
+	// Always show both output paths; the inactive stream is dimmed and the
+	// active (tailed) one keeps the bright label.
+	stdoutPath := selectedJob.ResolveStdOut()
+	if stdoutPath == "" {
+		stdoutPath = "—"
+	}
+	stderrPath := selectedJob.ResolveStdErr()
+	if stderrPath == "" {
+		stderrPath = "(merged into stdout / not set)"
+	}
+	outRow := label.Render("StdOut:") + " " + stdoutPath
+	errRow := label.Render("StdErr:") + " " + stderrPath
+	if m.showStderr {
+		outRow = faint.Render("StdOut: " + stdoutPath)
+	} else {
+		errRow = faint.Render("StdErr: " + stderrPath)
+	}
 	if selectedJob.State == slurm.Pending {
-		lastDetailRow = label.Render("Reason:") + " " + selectedJob.Reason
+		// Pending jobs come from squeue, which has no output paths yet.
+		outRow = label.Render("Reason:") + " " + selectedJob.Reason
+		errRow = ""
 	}
 	node := selectedJob.NodeList
 	if node == "" {
@@ -503,7 +596,8 @@ func (m model) View() string {
 		label.Render("Alloc CPUs:")+" "+selectedJob.AllocCPUS,
 		label.Render("Alloc TRES:")+" "+selectedJob.AllocTRES,
 		label.Render("Node:")+" "+node,
-		lastDetailRow,
+		outRow,
+		errRow,
 	)
 
 	listWidth := m.width / 3
@@ -511,7 +605,7 @@ func (m model) View() string {
 
 	_, v := docStyle.GetFrameSize()
 	availableHeight := m.height - v - tabBarHeight
-	detailsHeight := 10 + 2 + 2
+	detailsHeight := 11 + 2 + 2
 	stdoutExtra := 1 + 2 + 2
 	stdoutHeight := availableHeight - detailsHeight - stdoutExtra
 	if max := int(float64(availableHeight) * 0.6); stdoutHeight > max {
@@ -526,11 +620,15 @@ func (m model) View() string {
 		stdoutContent = "No output yet"
 	}
 
+	outStyle := listStyle
+	if m.outputFocused {
+		outStyle = outStyle.BorderForeground(highlight)
+	}
 	rightColumn := lipgloss.JoinVertical(lipgloss.Top,
 		listStyle.Width(detailsWidth-2).Padding(0, 1).Render(details),
 		lipgloss.JoinVertical(lipgloss.Top,
-			titleStyle.Render("StdOut (tail -f)"),
-			listStyle.Width(detailsWidth-2).Height(stdoutHeight).Padding(0, 1).Render(stdoutContent),
+			renderOutputHeader(m.showStderr, m.outputFocused),
+			outStyle.Width(detailsWidth-2).Height(stdoutHeight).Padding(0, 1).Render(stdoutContent),
 		),
 	)
 
@@ -603,16 +701,24 @@ func (m model) View() string {
 }
 
 func main() {
-	currentUser, err := user.Current()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error getting current user:", err)
-		os.Exit(1)
-	}
+	demo := flag.Bool("demo", false, "run with synthetic data (no SLURM required) for screenshots/recordings")
+	flag.Parse()
 
-	slurmClient, err := slurm.NewClient(currentUser.Username)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error initializing SLURM client: %v\n", err)
-		os.Exit(1)
+	var slurmClient *slurm.Client
+	if *demo {
+		slurmClient = slurm.NewDemoClient()
+	} else {
+		currentUser, err := user.Current()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Error getting current user:", err)
+			os.Exit(1)
+		}
+
+		slurmClient, err = slurm.NewClient(currentUser.Username)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error initializing SLURM client: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	initialJobInfos, err := slurmClient.GetJobs()
@@ -650,7 +756,7 @@ func main() {
 	if len(initialJobs) > 0 {
 		if item, ok := initialJobs[0].(slurm.JobInfo); ok {
 			m.currentJobID = item.JobID
-			m.currentStdOut = item.ResolveStdOut()
+			m.currentFile = item.ResolveStdOut()
 		}
 	}
 

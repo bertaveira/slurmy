@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,6 +24,7 @@ var desiredFields = []string{
 	"AllocTRES",
 	"NodeList",
 	"StdOut",
+	"StdErr",
 }
 
 // Client handles all SLURM interactions and maintains state like available fields.
@@ -30,6 +32,15 @@ type Client struct {
 	Username        string
 	AvailableFields map[string]bool
 	formatString    string
+
+	// Demo mode: when true, all SLURM calls return synthetic data instead of
+	// shelling out, so the app can run anywhere for screenshots/recordings.
+	Demo      bool
+	mu        sync.Mutex
+	demoJobs  []JobInfo
+	demoNodes []NodeInfo
+	demoSum   ClusterSummary
+	demoUsage []UserUsage
 }
 
 // NewClient creates a new SLURM client for the given user.
@@ -88,6 +99,12 @@ func (c *Client) HasField(name string) bool {
 // GetJobs fetches and merges jobs from both sacct (historical) and squeue (pending).
 // Pending jobs from squeue appear first; duplicates are deduplicated by JobID.
 func (c *Client) GetJobs() ([]JobInfo, error) {
+	if c.Demo {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return append([]JobInfo(nil), c.demoJobs...), nil
+	}
+
 	sacctJobs, sacctErr := c.runSacct()
 	squeueJobs, _ := runSqueue(c.Username)
 
@@ -150,6 +167,18 @@ func (c *Client) mergeJobs(squeueJobs, sacctJobs []JobInfo) []JobInfo {
 
 // CancelJob cancels the job with the given ID using scancel.
 func (c *Client) CancelJob(jobID string) error {
+	if c.Demo {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		for i := range c.demoJobs {
+			if c.demoJobs[i].JobID == jobID {
+				c.demoJobs[i].State = Canceled
+				c.demoJobs[i].Reason = ""
+			}
+		}
+		return nil
+	}
+
 	cmd := exec.Command("scancel", jobID)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

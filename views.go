@@ -112,6 +112,26 @@ func renderTabBar(active tab, width int) string {
 	return lipgloss.NewStyle().MarginLeft(1).Render(bar + hint)
 }
 
+// renderOutputHeader renders the stdout/stderr toggle chips plus a contextual
+// hint for the output pane on the Jobs tab.
+func renderOutputHeader(showStderr, focused bool) string {
+	active := lipgloss.NewStyle().Bold(true).Padding(0, 1).
+		Foreground(lipgloss.Color("#1C1C1C")).Background(highlight)
+	inactive := lipgloss.NewStyle().Padding(0, 1).Foreground(subtle)
+
+	stdoutChip, stderrChip := active.Render("stdout"), inactive.Render("stderr")
+	if showStderr {
+		stdoutChip, stderrChip = inactive.Render("stdout"), active.Render("stderr")
+	}
+	chips := lipgloss.JoinHorizontal(lipgloss.Top, stdoutChip, " ", stderrChip)
+
+	hint := "  enter: scroll · o/e: switch stream"
+	if focused {
+		hint = "  ▲ SCROLLING ▲  ↑/↓ pgup/pgdn g/G · esc: follow latest"
+	}
+	return chips + lipgloss.NewStyle().Faint(true).Render(hint)
+}
+
 // gpuBar renders a fixed-width bar of GPU cells: used (coloured), free (green),
 // and the remainder (down) dimmed. Used for node cards.
 func gpuBar(used, total int, usedColor lipgloss.Color, available bool) string {

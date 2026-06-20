@@ -23,6 +23,10 @@ type UserUsage struct {
 // aggregated from squeue. Running and pending jobs are tallied separately.
 // The result is sorted by running GPUs (then pending GPUs) descending.
 func (c *Client) GetUserUsage() ([]UserUsage, error) {
+	if c.Demo {
+		return c.demoUsage, nil
+	}
+
 	cmd := exec.Command("squeue",
 		"--noheader",
 		"-O", "UserName:|,StateCompact:|,tres-alloc:|,NumCPUs:|",

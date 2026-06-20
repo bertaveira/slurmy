@@ -6,17 +6,11 @@ A terminal UI for SLURM. Browse your completed and running jobs, read queued job
 
 ## Features
 
-- **Tabbed interface** — switch between **Jobs**, **Cluster**, and **Users** with `tab` or `1`/`2`/`3`
-- **Cluster tab** — at-a-glance GPU summary (used / free / down) plus a colour-coded grid of every node showing its state, per-GPU allocation bar, and CPU usage (data from `sinfo`)
-- **Users tab** — ranked bar chart of how many GPUs each user is running (and how many they have queued), aggregated from `squeue` across the whole cluster
-- **Job list** — shows jobs from the last 30 days via `sacct`, refreshed every 2 seconds
-- **Pending jobs at the top** — pulls queued jobs from `squeue` and prepends them with their wait reason (e.g. `Resources`, `Priority`)
-- **Live stdout tail** — right-hand panel tails the job's stdout file like `tail -f`, updating every second
-- **Large file support** — reads files backwards in 64 KB chunks (same strategy as `tail`), so multi-GB log files should open instantly
-- **ANSI & progress bar stripping** — cleans up tqdm bars and escape codes so the TUI stays readable
-- **SLURM path variables** — resolves `%u`, `%j`, `%J`, `%A`, `%a` in stdout paths automatically
-- **Job details** — shows job ID, name, user, account, start time, elapsed time, allocated CPUs, TRES, node list, and stdout path
-- **Cancel jobs** — press `c` to cancel the selected job (with confirmation prompt)
+- **Three tabs** — **Jobs**, **Cluster**, and **Users**, switched with `tab` or `1`/`2`/`3`
+- **Jobs** — your jobs from the last 30 days (`sacct`) with pending jobs and their wait reason pinned to the top (`squeue`); cancel the selected job with `c`
+- **Live stdout/stderr tail** — follows the selected job's output like `tail -f`; press `o`/`e` to switch stream and `enter` to scroll back through the log. Handles multi-GB files and strips ANSI / tqdm progress bars
+- **Cluster** — at-a-glance GPU summary (used / free / down) plus a colour-coded grid of every node with its state, per-GPU allocation, and CPU usage (`sinfo`)
+- **Users** — ranked bar chart of GPUs each user is running and has queued, across the whole cluster (`squeue`)
 
 ## Keybindings
 
@@ -82,6 +76,19 @@ make build-all           # both architectures
 ```
 
 Then `scp` the binary to your cluster and run it.
+
+## Demo mode
+
+Run with `--demo` to launch the UI on synthetic data — no SLURM, no cluster, no
+network. Useful for screenshots, recordings, or just trying it out:
+
+```bash
+slurmy --demo
+```
+
+It shows a made-up set of jobs (with a live-streaming log), a fake node grid,
+and fake per-user GPU usage. Synthetic log files are written under
+`/tmp/slurmy-demo/`.
 
 ## License
 
