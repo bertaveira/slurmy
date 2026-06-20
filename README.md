@@ -2,7 +2,7 @@
 
 A terminal UI for SLURM. Browse your completed and running jobs, read queued jobs, and tail stdout — all without leaving the terminal.
 
-![demo2](https://github.com/user-attachments/assets/98c96feb-2544-4916-95cd-2cfe42157216)
+https://github.com/user-attachments/assets/c9d1a062-9a2b-4a8e-addf-54a8bc2445aa
 
 ## Features
 
