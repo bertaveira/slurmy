@@ -376,19 +376,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c":
 			return m, tea.Quit
-		case "c":
-			if m.activeTab == tabJobs {
-				if item, ok := m.jobs.SelectedItem().(slurm.JobInfo); ok {
-					if item.State == slurm.Running || item.State == slurm.Pending {
-						m.showConfirm = true
-						m.confirmJobID = item.JobID
-						m.confirmJobName = item.JobName
+		}
+
+		// shortcuts ignored while typing for filters
+		if m.jobs.FilterState() != list.Filtering {
+			switch msg.String() {
+			case "q":
+				return m, tea.Quit
+			case "c":
+				if m.activeTab == tabJobs {
+					if item, ok := m.jobs.SelectedItem().(slurm.JobInfo); ok {
+						if item.State == slurm.Running || item.State == slurm.Pending {
+							m.showConfirm = true
+							m.confirmJobID = item.JobID
+							m.confirmJobName = item.JobName
+						}
 					}
 				}
+				return m, nil
 			}
-			return m, nil
 		}
 
 	case tea.WindowSizeMsg:
@@ -516,6 +524,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var listCmd tea.Cmd
 			m.jobs, listCmd = m.jobs.Update(msg)
 			cmds = append(cmds, listCmd)
+
+			// event to restore the selected job after filtering,
+			// by matching the jobId
+			if _, ok := msg.(list.FilterMatchesMsg); ok && m.currentJobID != "" {
+				for i, it := range m.jobs.VisibleItems() {
+					if j, ok := it.(slurm.JobInfo); ok && j.JobID == m.currentJobID {
+						m.jobs.Select(i)
+						break
+					}
+				}
+			}
 
 			if item, ok := m.jobs.SelectedItem().(slurm.JobInfo); ok {
 				if item.JobID != m.currentJobID {
@@ -731,9 +750,9 @@ func main() {
 		initialJobs[i] = job
 	}
 
-	delegate := list.NewDefaultDelegate()
-	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.Foreground(highlight).BorderLeftForeground(highlight)
-	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.Foreground(subtle).BorderLeftForeground(highlight)
+	// custom delegate to fix the ANSI rendering issue while
+	// filtering jobs. Can't highlight though for now
+	delegate := newJobDelegate()
 
 	vp := viewport.New(0, 0)
 	vp.SetContent("Loading...")

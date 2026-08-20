@@ -94,8 +94,8 @@ type JobInfo struct {
 	Reason      string // pending reason from squeue (e.g. "Resources", "Priority")
 }
 
-// Title implements the bubbletea list.Item interface.
-func (j JobInfo) Title() string {
+// StateBadge renders the colored state chip shown in the job title
+func (j JobInfo) StateBadge() string {
 	var stateStyle lipgloss.Style
 	switch j.State {
 	case Running:
@@ -111,7 +111,12 @@ func (j JobInfo) Title() string {
 	default:
 		stateStyle = stateBaseStyle.Background(colorUnknown)
 	}
-	return fmt.Sprintf("%s %s / %s", stateStyle.Render(j.State.String()), j.JobID, j.JobName)
+	return stateStyle.Render(j.State.String())
+}
+
+// Title implements the bubbletea list.Item interface
+func (j JobInfo) Title() string {
+	return fmt.Sprintf("%s %s / %s", j.StateBadge(), j.JobID, j.JobName)
 }
 
 // formatStart trims an ISO timestamp (2006-01-02T15:04:05) down to date + HH:MM.
@@ -127,9 +132,10 @@ func (j JobInfo) Description() string {
 	return fmt.Sprintf("%s | %s / elapsed %s", j.User, formatStart(j.StartTime), j.ElapsedTime)
 }
 
-// FilterValue implements the bubbletea list.Item interface.
+// FilterValue implements the bubbletea list.Item interface. It combines the
+// Job ID, name, and state, to be able to search for these 3 information.
 func (j JobInfo) FilterValue() string {
-	return j.JobID
+	return j.JobID + " " + j.JobName + " " + j.State.String()
 }
 
 // ResolveStdOut resolves SLURM filename pattern variables in the stdout path.
