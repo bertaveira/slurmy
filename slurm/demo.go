@@ -156,6 +156,7 @@ func demoNodes() []NodeInfo {
 			GPUTotal: 8, GPUUsed: used, GPUType: gpuType,
 			CPUAlloc: cpuAlloc, CPUTotal: 128,
 			MemTotalMB: 1031000, MemFreeMB: 512000,
+			MemAllocMB: cpuAlloc * 6000,
 		}
 	}
 	cpu := func(name, state string, cpuAlloc int) NodeInfo {
@@ -163,6 +164,7 @@ func demoNodes() []NodeInfo {
 			Name: name, State: state, Partition: "cpu",
 			CPUAlloc: cpuAlloc, CPUTotal: 128,
 			MemTotalMB: 515000, MemFreeMB: 256000,
+			MemAllocMB: cpuAlloc * 3000,
 		}
 	}
 

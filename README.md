@@ -9,7 +9,8 @@ https://github.com/user-attachments/assets/c9d1a062-9a2b-4a8e-addf-54a8bc2445aa
 - **Three tabs** — **Jobs**, **Cluster**, and **Users**, switched with `tab` or `1`/`2`/`3`
 - **Jobs** — your jobs from the last 30 days (`sacct`) with pending jobs and their wait reason pinned to the top (`squeue`); cancel the selected job with `c`
 - **Live stdout/stderr tail** — follows the selected job's output like `tail -f`; press `o`/`e` to switch stream and `enter` to scroll back through the log. Handles multi-GB files and strips ANSI / tqdm progress bars
-- **Cluster** — at-a-glance GPU summary (used / free / down) plus a colour-coded grid of every node with its state, per-GPU allocation, and CPU usage (`sinfo`)
+- **Cluster** — at-a-glance GPU summary (used / free / down) plus a colour-coded grid of every node with its state, per-GPU allocation, CPU usage, and reserved/total RAM (`sinfo`). The popup RAM meter overlays OS-reported usage (cyan) on reserved capacity (amber); these are independent readings, not additive. OS usage includes system activity and cache
+- **Node inspection** — select a node with the arrow keys and press `enter` to open a popup with GPU/CPU meters and compact job cards. Each card shows CPU/GPU/memory reservations and a wall-time progress bar with elapsed and remaining time. Multi-node allocations are labelled as whole-job totals. Details refresh every two seconds; `Esc` closes the popup
 - **Users** — ranked bar chart of GPUs each user is running and has queued, across the whole cluster (`squeue`)
 
 ## Keybindings
@@ -19,6 +20,8 @@ https://github.com/user-attachments/assets/c9d1a062-9a2b-4a8e-addf-54a8bc2445aa
 | `tab` / `shift+tab` | Cycle between tabs (Jobs / Cluster / Users) |
 | `1` / `2` / `3` | Jump straight to a tab |
 | `↑`/`↓` or `j`/`k` | Navigate job list / scroll the active tab |
+| Arrow keys or `h`/`j`/`k`/`l` | Select a node in the Cluster grid |
+| `enter` / `Esc` | Inspect selected node / return to Cluster grid |
 | `c` | Cancel selected job (Jobs tab, running/pending only) |
 | `y` | Confirm cancellation |
 | `n` or `Esc` | Dismiss confirmation |

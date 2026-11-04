@@ -5,6 +5,41 @@ import (
 	"testing"
 )
 
+func TestNodeMemoryUsage(t *testing.T) {
+	for _, tt := range []struct {
+		free            string
+		used, available int
+		known           bool
+	}{
+		{"256000", 256000, 256000, true},
+		{"0", 512000, 0, true},
+		{"600000", 0, 512000, true},
+		{"-1", 0, 0, false},
+		{"N/A", 0, 0, false},
+		{"", 0, 0, false},
+	} {
+		t.Run(tt.free, func(t *testing.T) {
+			nodes := parseNodes("node01|idle|(null)|(null)|0/64/0/64|normal|512000|" + tt.free + "|")
+			used, free, known := nodes[0].MemoryUsage()
+			if used != tt.used || free != tt.available || known != tt.known {
+				t.Errorf("MemoryUsage() = %d, %d, %v; want %d, %d, %v", used, free, known, tt.used, tt.available, tt.known)
+			}
+		})
+	}
+}
+
+func TestParseNodeReservedMemory(t *testing.T) {
+	for _, value := range []struct {
+		field string
+		want  int
+	}{{"4096", 4096}, {"0", 0}, {"N/A", -1}} {
+		nodes := parseNodes("node01|mixed|(null)|(null)|1/63/0/64|normal|512000|256000|" + value.field + "|")
+		if nodes[0].MemAllocMB != value.want {
+			t.Errorf("AllocMem %q parsed as %d, want %d", value.field, nodes[0].MemAllocMB, value.want)
+		}
+	}
+}
+
 func TestParseNodesMultiplePartitions(t *testing.T) {
 	output := `node01 | mixed | gpu:H200:8 | gpu:H200:2 | 16/48/0/64 | high | 512000 | 256000 |
 node01 | mixed | gpu:H200:8 | gpu:H200:2 | 16/48/0/64 | normal | 512000 | 256000 |
@@ -15,7 +50,7 @@ node01 | mixed | gpu:H200:8 | gpu:H200:2 | 16/48/0/64 | high | 512000 | 256000 |
 	wantNodes := []NodeInfo{{
 		Name: "node01", State: "mixed", Partition: "high,normal,low",
 		GPUTotal: 8, GPUUsed: 2, GPUType: "H200",
-		CPUAlloc: 16, CPUTotal: 64, MemTotalMB: 512000, MemFreeMB: 256000,
+		CPUAlloc: 16, CPUTotal: 64, MemTotalMB: 512000, MemFreeMB: 256000, MemAllocMB: -1,
 	}}
 	if !reflect.DeepEqual(nodes, wantNodes) {
 		t.Fatalf("parseNodes() = %+v, want %+v", nodes, wantNodes)
