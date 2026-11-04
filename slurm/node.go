@@ -2,6 +2,7 @@ package slurm
 
 import (
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -11,7 +12,7 @@ import (
 type NodeInfo struct {
 	Name      string
 	State     string // long state, e.g. "mixed", "allocated", "idle", "drained"
-	Partition string
+	Partition string // comma-separated partition memberships, in first-seen order
 
 	GPUTotal int
 	GPUUsed  int
@@ -76,8 +77,8 @@ type ClusterSummary struct {
 }
 
 // GetNodes fetches all cluster nodes via sinfo and returns them along with an
-// aggregate summary. Every requested sinfo field is a single whitespace-free
-// token, so each line splits cleanly into the expected columns.
+// aggregate summary. Nodes belonging to multiple partitions appear only once,
+// with their partition memberships merged.
 func (c *Client) GetNodes() ([]NodeInfo, ClusterSummary, error) {
 	if c.Demo {
 		return c.demoNodes, c.demoSum, nil
@@ -93,9 +94,17 @@ func (c *Client) GetNodes() ([]NodeInfo, ClusterSummary, error) {
 		return nil, ClusterSummary{}, err
 	}
 
-	var nodes []NodeInfo
+	nodes := parseNodes(string(output))
+	return nodes, summarize(nodes), nil
+}
 
-	for _, line := range strings.Split(string(output), "\n") {
+// parseNodes parses pipe-delimited sinfo output, which may contain one row per
+// node-partition pair. Resource data is retained from the first row for each node.
+func parseNodes(output string) []NodeInfo {
+	var nodes []NodeInfo
+	byName := make(map[string]int)
+
+	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -110,10 +119,23 @@ func (c *Client) GetNodes() ([]NodeInfo, ClusterSummary, error) {
 			fields[i] = strings.TrimSpace(fields[i])
 		}
 
+		if i, ok := byName[fields[0]]; ok {
+			node := &nodes[i]
+			partition := fields[5]
+			if partition != "" && !slices.Contains(strings.Split(node.Partition, ","), partition) {
+				if node.Partition != "" {
+					node.Partition += ","
+				}
+				node.Partition += partition
+			}
+			continue
+		}
+
 		gpuTotal, gpuType := parseGres(fields[2])
 		gpuUsed, _ := parseGres(fields[3])
 		cpuAlloc, cpuTotal := parseCPUsState(fields[4])
 
+		byName[fields[0]] = len(nodes)
 		nodes = append(nodes, NodeInfo{
 			Name:       fields[0],
 			State:      fields[1],
@@ -128,7 +150,7 @@ func (c *Client) GetNodes() ([]NodeInfo, ClusterSummary, error) {
 		})
 	}
 
-	return nodes, summarize(nodes), nil
+	return nodes
 }
 
 // summarize aggregates resource usage across a set of nodes.
