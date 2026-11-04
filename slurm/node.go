@@ -22,7 +22,18 @@ type NodeInfo struct {
 	CPUTotal int
 
 	MemTotalMB int // total real memory in MB
-	MemFreeMB  int // free memory in MB
+	MemFreeMB  int // OS-reported free memory in MB; -1 when unavailable
+	MemAllocMB int // memory reserved by Slurm in MB; -1 when unavailable
+}
+
+// MemoryUsage returns OS-reported used and free memory, independently of job
+// reservations. Slurm's FreeMem can be unknown (-1) or stale on offline nodes.
+func (n NodeInfo) MemoryUsage() (used, free int, known bool) {
+	if n.MemTotalMB <= 0 || n.MemFreeMB < 0 {
+		return 0, 0, false
+	}
+	free = min(n.MemFreeMB, n.MemTotalMB)
+	return n.MemTotalMB - free, free, true
 }
 
 // HasGPU reports whether the node advertises any GPUs.
@@ -87,7 +98,7 @@ func (c *Client) GetNodes() ([]NodeInfo, ClusterSummary, error) {
 	cmd := exec.Command("sinfo",
 		"--Node",
 		"--noheader",
-		"-O", "NodeList:|,StateLong:|,Gres:|,GresUsed:|,CPUsState:|,Partition:|,Memory:|,FreeMem:|",
+		"-O", "NodeList:|,StateLong:|,Gres:|,GresUsed:|,CPUsState:|,Partition:|,Memory:|,FreeMem:|,AllocMem:|",
 	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -111,7 +122,7 @@ func parseNodes(output string) []NodeInfo {
 		}
 
 		fields := strings.Split(line, "|")
-		// Expect 8 fields; trailing delimiter yields an empty 9th element.
+		// The optional ninth field is AllocMem; older fixtures may omit it.
 		if len(fields) < 8 {
 			continue
 		}
@@ -134,6 +145,10 @@ func parseNodes(output string) []NodeInfo {
 		gpuTotal, gpuType := parseGres(fields[2])
 		gpuUsed, _ := parseGres(fields[3])
 		cpuAlloc, cpuTotal := parseCPUsState(fields[4])
+		memAlloc := -1
+		if len(fields) > 8 {
+			memAlloc = parseFreeMem(fields[8])
+		}
 
 		byName[fields[0]] = len(nodes)
 		nodes = append(nodes, NodeInfo{
@@ -146,7 +161,8 @@ func parseNodes(output string) []NodeInfo {
 			CPUTotal:   cpuTotal,
 			Partition:  fields[5],
 			MemTotalMB: atoiSafe(fields[6]),
-			MemFreeMB:  atoiSafe(fields[7]),
+			MemFreeMB:  parseFreeMem(fields[7]),
+			MemAllocMB: memAlloc,
 		})
 	}
 
@@ -221,6 +237,14 @@ func atoiSafe(s string) int {
 	n, err := strconv.Atoi(strings.TrimSpace(s))
 	if err != nil {
 		return 0
+	}
+	return n
+}
+
+func parseFreeMem(s string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 0 {
+		return -1
 	}
 	return n
 }

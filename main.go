@@ -245,9 +245,17 @@ type model struct {
 	usersView   viewport.Model
 
 	// Cluster tab data
-	nodes      []slurm.NodeInfo
-	clusterSum slurm.ClusterSummary
-	clusterErr error
+	nodes           []slurm.NodeInfo
+	clusterSum      slurm.ClusterSummary
+	clusterErr      error
+	selectedNode    string
+	inspectingNode  bool
+	nodeJobs        []slurm.NodeJob
+	nodeJobsErr     error
+	nodeJobsLoading bool
+	nodeJobsRequest uint64
+	gridOffset      int
+	nodeDetailView  viewport.Model
 
 	// Users tab data
 	usages   []slurm.UserUsage
@@ -286,6 +294,9 @@ func (m *model) loadStreamCmd() tea.Cmd {
 func (m model) refreshTabCmd() tea.Cmd {
 	switch m.activeTab {
 	case tabCluster:
+		if m.inspectingNode {
+			return tea.Batch(fetchNodesCmd(m.slurmClient), m.fetchNodeJobsCmd())
+		}
 		return fetchNodesCmd(m.slurmClient)
 	case tabUsers:
 		return fetchUsageCmd(m.slurmClient)
@@ -345,6 +356,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "3":
 				m.activeTab = tabUsers
 				return m, m.refreshTabCmd()
+			}
+		}
+
+		if m.activeTab == tabCluster {
+			if handled, cmd := m.handleClusterKey(msg.String()); handled {
+				return m, cmd
 			}
 		}
 
@@ -437,14 +454,36 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clusterView.Height = tabContentHeight
 		m.usersView.Width = tabContentWidth
 		m.usersView.Height = tabContentHeight
-		m.clusterView.SetContent(renderClusterView(m.nodes, m.clusterSum, m.clusterErr, tabContentWidth))
+		m.updateClusterContent()
 		m.usersView.SetContent(renderUsersView(m.usages, m.usageErr, tabContentWidth))
 
 	case nodesMsg:
-		m.nodes = msg.nodes
-		m.clusterSum = msg.summary
+		if msg.err == nil {
+			m.nodes = msg.nodes
+			m.clusterSum = msg.summary
+		}
 		m.clusterErr = msg.err
-		m.clusterView.SetContent(renderClusterView(m.nodes, m.clusterSum, m.clusterErr, m.clusterView.Width))
+		if !m.inspectingNode && len(m.nodes) > 0 {
+			found := false
+			for _, node := range m.nodes {
+				if node.Name == m.selectedNode {
+					found = true
+					break
+				}
+			}
+			if !found {
+				m.selectedNode = m.nodes[0].Name
+			}
+		}
+		m.updateClusterContent()
+
+	case nodeJobsMsg:
+		if m.inspectingNode && msg.node == m.selectedNode && msg.request == m.nodeJobsRequest {
+			m.nodeJobs = msg.jobs
+			m.nodeJobsErr = msg.err
+			m.nodeJobsLoading = false
+			m.updateClusterContent()
+		}
 
 	case usageMsg:
 		m.usages = msg.usages
@@ -538,7 +577,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if !isKey || m.activeTab == tabCluster {
 		var cvCmd tea.Cmd
-		m.clusterView, cvCmd = m.clusterView.Update(msg)
+		if m.inspectingNode && m.activeTab == tabCluster {
+			m.nodeDetailView, cvCmd = m.nodeDetailView.Update(msg)
+		} else {
+			m.clusterView, cvCmd = m.clusterView.Update(msg)
+		}
 		cmds = append(cmds, cvCmd)
 	}
 
@@ -647,6 +690,9 @@ func (m model) View() string {
 
 	tabBar := renderTabBar(m.activeTab, m.width)
 	mainView := docStyle.Render(lipgloss.JoinVertical(lipgloss.Left, tabBar, "", body))
+	if m.activeTab == tabCluster && m.inspectingNode {
+		mainView = overlayNodePopup(mainView, m.nodePopup(), m.width, m.height)
+	}
 
 	// Show status message at the bottom if present
 	if m.cancelStatus != "" {
@@ -744,11 +790,12 @@ func main() {
 	usersVP.SetContent("Loading user usage…")
 
 	m := model{
-		jobs:        list.New(initialJobs, delegate, 0, 0),
-		slurmClient: slurmClient,
-		stdoutView:  vp,
-		clusterView: clusterVP,
-		usersView:   usersVP,
+		jobs:           list.New(initialJobs, delegate, 0, 0),
+		slurmClient:    slurmClient,
+		stdoutView:     vp,
+		clusterView:    clusterVP,
+		nodeDetailView: viewport.New(0, 0),
+		usersView:      usersVP,
 	}
 	m.jobs.Title = "Your Slurm Jobs (last 30 days)"
 	m.jobs.Styles.Title = titleStyle

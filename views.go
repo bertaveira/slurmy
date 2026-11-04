@@ -153,7 +153,7 @@ func gpuBar(used, total int, usedColor lipgloss.Color, available bool) string {
 }
 
 // renderNodeCard renders one compact node box.
-func renderNodeCard(n slurm.NodeInfo) string {
+func renderNodeCard(n slurm.NodeInfo, selected bool) string {
 	col := stateColor(n.State)
 	header := lipgloss.NewStyle().Bold(true).Foreground(col).Render(n.Name) +
 		" " + lipgloss.NewStyle().Foreground(col).Render(shortState(n.State))
@@ -168,17 +168,24 @@ func renderNodeCard(n slurm.NodeInfo) string {
 
 	cpuLine := lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf("cpu %d/%d", n.CPUAlloc, n.CPUTotal))
 
-	body := lipgloss.JoinVertical(lipgloss.Left, header, midLine, cpuLine)
+	ramLine := "ram —"
+	if n.MemAllocMB >= 0 && n.MemTotalMB > 0 {
+		ramLine = fmt.Sprintf("ram %.0f/%.0f GiB", float64(n.MemAllocMB)/1024, float64(n.MemTotalMB)/1024)
+	}
+	body := lipgloss.JoinVertical(lipgloss.Left, header, midLine, cpuLine, lipgloss.NewStyle().Faint(true).Render(ramLine))
 	border := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(subtle).
 		Padding(0, 1).
 		Width(22)
+	if selected {
+		border = border.BorderForeground(highlight)
+	}
 	return border.Render(body)
 }
 
 // renderClusterView builds the full cluster tab content (summary + node grid).
-func renderClusterView(nodes []slurm.NodeInfo, summary slurm.ClusterSummary, err error, width int) string {
+func renderClusterView(nodes []slurm.NodeInfo, summary slurm.ClusterSummary, err error, width int, selected string) string {
 	if err != nil {
 		return lipgloss.NewStyle().Foreground(colAlloc).Render(fmt.Sprintf("sinfo error: %v", err))
 	}
@@ -236,7 +243,7 @@ func renderClusterView(nodes []slurm.NodeInfo, summary slurm.ClusterSummary, err
 
 	var cards []string
 	for _, n := range nodes {
-		cards = append(cards, renderNodeCard(n))
+		cards = append(cards, renderNodeCard(n, n.Name == selected))
 	}
 
 	var rows []string
@@ -249,7 +256,7 @@ func renderClusterView(nodes []slurm.NodeInfo, summary slurm.ClusterSummary, err
 	}
 	grid := lipgloss.JoinVertical(lipgloss.Left, rows...)
 
-	legend := lipgloss.NewStyle().Faint(true).Render("▰ used   ▱ free   colour = node state")
+	legend := lipgloss.NewStyle().Faint(true).Render("▰ used   ▱ free   colour = node state · arrows/hjkl: select · enter: inspect")
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		summaryBlock,
